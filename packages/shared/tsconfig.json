@@ -5,11 +5,9 @@
     "moduleResolution": "bundler",
     "outDir": "dist",
     "rootDir": "src",
+    "composite": true,
     "declaration": true,
     "noEmit": false
   },
-  "include": ["src"],
-  "references": [
-    { "path": "../shared" }
-  ]
+  "include": ["src"]
 }

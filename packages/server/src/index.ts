@@ -7,6 +7,9 @@ import pool from "./db.js";
 import { wordsRouter } from "./routes/words.js";
 import { attemptsRouter } from "./routes/attempts.js";
 import { statsRouter } from "./routes/stats.js";
+import { masteryRouter } from "./routes/mastery.js";
+import { schedulerRouter } from "./routes/scheduler.js";
+import { sessionsRouter } from "./routes/sessions.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -30,6 +33,9 @@ app.get("/api/health", async (_req, res) => {
 app.use("/api/words", wordsRouter);
 app.use("/api/attempts", attemptsRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/mastery", masteryRouter);
+app.use("/api/scheduler", schedulerRouter);
+app.use("/api/sessions", sessionsRouter);
 
 // ---- Static files (built frontend) ----
 // Serve the Vite build from packages/web/dist whenever it exists.

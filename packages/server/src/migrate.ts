@@ -77,12 +77,57 @@ CREATE TABLE IF NOT EXISTS user_stats (
 );
 `;
 
+const UP_002 = `
+-- Cached mastery score per user + word.
+-- Recomputable from the attempts table at any time, but cached here
+-- so the scheduler can query it without scanning all attempts.
+CREATE TABLE IF NOT EXISTS word_mastery (
+  user_id          INTEGER NOT NULL REFERENCES users(id),
+  word_id          INTEGER NOT NULL REFERENCES words(id),
+  app              TEXT NOT NULL DEFAULT 'spelling',
+  mastery_score    NUMERIC(3,1) NOT NULL DEFAULT 0,
+  has_ever_missed  BOOLEAN NOT NULL DEFAULT false,
+  attempt_count    INTEGER NOT NULL DEFAULT 0,
+  next_review_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_attempted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, word_id, app)
+);
+
+CREATE INDEX IF NOT EXISTS idx_word_mastery_review
+  ON word_mastery(user_id, app, next_review_at);
+
+-- Completed sessions, used to compute accuracy windows for adaptive leveling.
+CREATE TABLE IF NOT EXISTS sessions (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id),
+  app             TEXT NOT NULL DEFAULT 'spelling',
+  mode            TEXT NOT NULL CHECK (mode IN ('learn', 'practice', 'test')),
+  total_words     INTEGER NOT NULL,
+  correct_count   INTEGER NOT NULL,
+  accuracy        NUMERIC(5,4) NOT NULL,
+  level_at_start  NUMERIC(3,1) NOT NULL,
+  level_at_end    NUMERIC(3,1) NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user
+  ON sessions(user_id, app, created_at);
+`;
+
+interface Migration {
+  name: string;
+  sql: string;
+}
+
+const MIGRATIONS: Migration[] = [
+  { name: "001_initial_schema", sql: UP },
+  { name: "002_mastery_and_sessions", sql: UP_002 },
+];
+
 async function migrate() {
   const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-
-    // Check if this migration already ran
+    // Ensure migrations table exists
     await client.query(`
       CREATE TABLE IF NOT EXISTS migrations (
         id          SERIAL PRIMARY KEY,
@@ -91,26 +136,30 @@ async function migrate() {
       )
     `);
 
-    const existing = await client.query(
-      "SELECT 1 FROM migrations WHERE name = $1",
-      ["001_initial_schema"],
-    );
+    for (const migration of MIGRATIONS) {
+      await client.query("BEGIN");
 
-    if (existing.rows.length > 0) {
-      console.log("Migration 001_initial_schema already applied, skipping.");
+      const existing = await client.query(
+        "SELECT 1 FROM migrations WHERE name = $1",
+        [migration.name],
+      );
+
+      if (existing.rows.length > 0) {
+        console.log(`Migration ${migration.name} already applied, skipping.`);
+        await client.query("COMMIT");
+        continue;
+      }
+
+      await client.query(migration.sql);
+
+      await client.query(
+        "INSERT INTO migrations (name) VALUES ($1)",
+        [migration.name],
+      );
+
       await client.query("COMMIT");
-      return;
+      console.log(`Migration ${migration.name} applied successfully.`);
     }
-
-    await client.query(UP);
-
-    await client.query(
-      "INSERT INTO migrations (name) VALUES ($1)",
-      ["001_initial_schema"],
-    );
-
-    await client.query("COMMIT");
-    console.log("Migration 001_initial_schema applied successfully.");
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("Migration failed:", err);
