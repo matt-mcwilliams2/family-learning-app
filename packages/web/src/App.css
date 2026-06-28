@@ -143,6 +143,39 @@
   margin-top: 8px;
 }
 
+/* ---- Mode picker buttons ---- */
+
+.btn-learn {
+  background: var(--color-secondary);
+  color: var(--color-white);
+}
+
+.btn-practice {
+  background: var(--color-main);
+  color: var(--color-white);
+}
+
+.btn-test {
+  background: var(--color-accent);
+  color: var(--color-main);
+}
+
+.mode-heading {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-main);
+  text-align: center;
+}
+
+.mode-desc {
+  font-size: 13px;
+  color: #666;
+  text-align: center;
+  margin-top: -12px;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+
 /* ---- Input ---- */
 
 .spelling-input {
@@ -202,4 +235,176 @@
   font-size: 16px;
   color: #555;
   margin-bottom: 4px;
+}
+
+/* ---- Placement ---- */
+
+.placement-banner {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.placement-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-main);
+}
+
+.placement-sub {
+  font-size: 14px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.placement-level-result {
+  font-size: 24px;
+  text-align: center;
+  color: var(--color-main);
+}
+
+.placement-accuracy {
+  font-size: 16px;
+  text-align: center;
+  color: #555;
+}
+
+.band-scores {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.band-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--color-bg);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.band-label {
+  font-weight: 600;
+  color: var(--color-main);
+}
+
+.band-value {
+  color: #555;
+}
+
+/* ---- Session ---- */
+
+.session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mode-badge {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  color: var(--color-white);
+}
+
+.mode-learn {
+  background: var(--color-secondary);
+}
+
+.mode-practice {
+  background: var(--color-main);
+}
+
+.mode-test {
+  background: var(--color-accent);
+  color: var(--color-main);
+}
+
+.retest-badge {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: var(--color-third);
+  color: var(--color-white);
+}
+
+.word-progress {
+  font-size: 14px;
+  color: #888;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* ---- Session results ---- */
+
+.session-score {
+  text-align: center;
+}
+
+.score-big {
+  display: block;
+  font-size: 48px;
+  font-weight: 800;
+  color: var(--color-main);
+  line-height: 1.1;
+}
+
+.score-detail {
+  font-size: 16px;
+  color: #666;
+}
+
+.level-change {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+.level-up {
+  background: #e8f5e9;
+  color: var(--color-correct);
+}
+
+.level-down {
+  background: #ffeaea;
+  color: var(--color-third);
+}
+
+.missed-words {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.missed-heading {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-main);
+}
+
+.missed-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #ffeaea;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.missed-word {
+  font-weight: 600;
+  color: var(--color-main);
+}
+
+.missed-typed {
+  color: var(--color-third);
+  text-decoration: line-through;
 }

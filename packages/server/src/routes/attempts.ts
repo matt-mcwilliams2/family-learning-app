@@ -111,6 +111,25 @@ attemptsRouter.post("/", async (req, res) => {
       ],
     );
 
+    // --- Track word introduction (seen in 2+ exercise types) ---
+    await client.query(
+      `INSERT INTO word_introductions (user_id, word_id, app, exercise_types, introduced)
+       VALUES ($1, $2, $3, ARRAY[$4::text], false)
+       ON CONFLICT (user_id, word_id, app)
+       DO UPDATE SET
+         exercise_types = CASE
+           WHEN $4 = ANY(word_introductions.exercise_types)
+           THEN word_introductions.exercise_types
+           ELSE array_append(word_introductions.exercise_types, $4::text)
+         END,
+         introduced = CASE
+           WHEN $4 = ANY(word_introductions.exercise_types)
+           THEN array_length(word_introductions.exercise_types, 1) >= 2
+           ELSE array_length(word_introductions.exercise_types, 1) + 1 >= 2
+         END`,
+      [userId, wordId, appName, exerciseType],
+    );
+
     await client.query("COMMIT");
 
     res.json({

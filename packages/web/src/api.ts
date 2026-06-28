@@ -1,11 +1,13 @@
 export interface WordFromApi {
   id: number;
   word: string;
-  grade: string;
+  grade: number;
   definition: string;
   example: string | null;
   syllables: string | null;
-  pronunciation_override: string | null;
+  pronunciationOverride: string | null;
+  // Legacy snake_case aliases for backward compat
+  pronunciation_override?: string | null;
 }
 
 export interface Stats {
@@ -19,14 +21,72 @@ export interface AttemptResult {
   attemptId: number;
   createdAt: string;
   pointsAwarded: number;
+  masteryScore: number;
+  hasEverMissed: boolean;
+  nextReviewAt: string;
+}
+
+export interface PlacementStatus {
+  taken: boolean;
+  placementLevel: number | null;
+  currentLevel: number;
+}
+
+export interface PlacementQuiz {
+  totalWords: number;
+  words: WordFromApi[];
+}
+
+export interface PlacementScoreResult {
+  placementLevel: number;
+  totalCorrect: number;
+  totalWords: number;
+  overallAccuracy: number;
+  bandScores: Array<{
+    grade: number;
+    correct: number;
+    total: number;
+    accuracy: number;
+  }>;
+}
+
+export interface SessionWords {
+  mode: string;
+  currentLevel: number;
+  wordCount: number;
+  words: WordFromApi[];
+}
+
+export interface SessionResult {
+  sessionId: number;
+  createdAt: string;
+  accuracy: number;
+  levelBefore: number;
+  levelAfter: number;
+  levelDirection: "up" | "down" | "hold";
 }
 
 // Hardcoded for now — single seeded child. Real auth comes in a later slice.
 const USER_ID = 1;
 
+export function getUserId(): number {
+  return USER_ID;
+}
+
 export async function fetchWords(): Promise<WordFromApi[]> {
   const res = await fetch("/api/words?app=spelling&grade=6");
   if (!res.ok) throw new Error("Failed to load words");
+  return res.json();
+}
+
+export async function fetchSessionWords(
+  mode: "learn" | "practice" | "test",
+  limit = 10,
+): Promise<SessionWords> {
+  const res = await fetch(
+    `/api/words/session/${USER_ID}?app=spelling&mode=${mode}&limit=${limit}`,
+  );
+  if (!res.ok) throw new Error("Failed to load session words");
   return res.json();
 }
 
@@ -57,5 +117,50 @@ export async function postAttempt(params: {
     }),
   });
   if (!res.ok) throw new Error("Failed to record attempt");
+  return res.json();
+}
+
+export async function postSession(params: {
+  mode: "learn" | "practice" | "test";
+  totalWords: number;
+  correctCount: number;
+}): Promise<SessionResult> {
+  const res = await fetch("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      userId: USER_ID,
+      app: "spelling",
+      mode: params.mode,
+      totalWords: params.totalWords,
+      correctCount: params.correctCount,
+    }),
+  });
+  if (!res.ok) throw new Error("Failed to record session");
+  return res.json();
+}
+
+// Placement
+export async function fetchPlacementStatus(): Promise<PlacementStatus> {
+  const res = await fetch(`/api/placement/${USER_ID}/status`);
+  if (!res.ok) throw new Error("Failed to check placement status");
+  return res.json();
+}
+
+export async function fetchPlacementQuiz(): Promise<PlacementQuiz> {
+  const res = await fetch(`/api/placement/${USER_ID}/quiz`);
+  if (!res.ok) throw new Error("Failed to load placement quiz");
+  return res.json();
+}
+
+export async function scorePlacement(
+  results: Array<{ wordId: number; grade: number; correct: boolean }>,
+): Promise<PlacementScoreResult> {
+  const res = await fetch(`/api/placement/${USER_ID}/score`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ results }),
+  });
+  if (!res.ok) throw new Error("Failed to score placement");
   return res.json();
 }

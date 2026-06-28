@@ -119,9 +119,28 @@ interface Migration {
   sql: string;
 }
 
+const UP_003 = `
+-- Track whether a student has taken the placement test.
+-- NULL means not yet taken; a value is the computed starting level.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS placement_level NUMERIC(3,1);
+
+-- Track which exercise types a student has seen each word in,
+-- so we know when a word counts as "introduced" (2+ types).
+-- This is a materialized cache; recomputable from attempts.
+CREATE TABLE IF NOT EXISTS word_introductions (
+  user_id        INTEGER NOT NULL REFERENCES users(id),
+  word_id        INTEGER NOT NULL REFERENCES words(id),
+  app            TEXT NOT NULL DEFAULT 'spelling',
+  exercise_types TEXT[] NOT NULL DEFAULT '{}',
+  introduced     BOOLEAN NOT NULL DEFAULT false,
+  PRIMARY KEY (user_id, word_id, app)
+);
+`;
+
 const MIGRATIONS: Migration[] = [
   { name: "001_initial_schema", sql: UP },
   { name: "002_mastery_and_sessions", sql: UP_002 },
+  { name: "003_placement_and_introductions", sql: UP_003 },
 ];
 
 async function migrate() {

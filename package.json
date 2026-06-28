@@ -14,6 +14,7 @@
     "build": "npm run -w @family-learning/web build && npm run -w @family-learning/server build",
     "start": "node packages/server/dist/index.js",
     "migrate": "npm run -w @family-learning/server migrate",
-    "seed": "npm run -w @family-learning/server seed"
+    "seed": "npm run -w @family-learning/server seed",
+    "seed-words": "npm run -w @family-learning/server seed-words"
   }
 }

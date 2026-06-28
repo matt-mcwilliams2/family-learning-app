@@ -10,6 +10,7 @@ import { statsRouter } from "./routes/stats.js";
 import { masteryRouter } from "./routes/mastery.js";
 import { schedulerRouter } from "./routes/scheduler.js";
 import { sessionsRouter } from "./routes/sessions.js";
+import { placementRouter } from "./routes/placement.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -36,6 +37,7 @@ app.use("/api/stats", statsRouter);
 app.use("/api/mastery", masteryRouter);
 app.use("/api/scheduler", schedulerRouter);
 app.use("/api/sessions", sessionsRouter);
+app.use("/api/placement", placementRouter);
 
 // ---- Static files (built frontend) ----
 // Serve the Vite build from packages/web/dist whenever it exists.
