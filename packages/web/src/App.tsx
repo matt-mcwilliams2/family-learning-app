@@ -13,10 +13,12 @@ import {
   type PlacementScoreResult,
   type SessionResult,
 } from "./api";
+import { PickSpelling } from "./PickSpelling";
+import { MatchExercise } from "./MatchExercise";
 import "./App.css";
 
 // ────────────────────────────────────────────────
-// Top-level screen state machine
+// Types
 // ────────────────────────────────────────────────
 type Screen =
   | "loading"
@@ -28,14 +30,28 @@ type Screen =
 
 type SessionMode = "learn" | "practice" | "test";
 
-// Per-word result tracked during a session
+type SessionStage =
+  | "match"
+  | "pick_spelling"
+  | "hear_and_spell"
+  | "out_of_lives";
+
 interface WordResult {
   word: WordFromApi;
   correct: boolean;
   answerGiven: string;
 }
 
+// ────────────────────────────────────────────────
+// Constants
+// ────────────────────────────────────────────────
+const LIVES_PRACTICE = 5;
+const LIVES_TEST = 3;
+const RECOVERY_LIVES = 2;
+const TEST_MAX_REPLAYS = 1;
+
 export function App() {
+  // ── Screen state ──
   const [screen, setScreen] = useState<Screen>("loading");
   const [stats, setStats] = useState<Stats>({
     totalPoints: 0,
@@ -45,13 +61,14 @@ export function App() {
   });
   const [currentLevel, setCurrentLevel] = useState(6.0);
 
-  // Placement state
+  // ── Placement ──
   const [placementWords, setPlacementWords] = useState<WordFromApi[]>([]);
   const [placementResults, setPlacementResults] =
     useState<PlacementScoreResult | null>(null);
 
-  // Session state
+  // ── Session ──
   const [sessionMode, setSessionMode] = useState<SessionMode>("practice");
+  const [sessionStage, setSessionStage] = useState<SessionStage>("hear_and_spell");
   const [sessionWords, setSessionWords] = useState<WordFromApi[]>([]);
   const [wordIndex, setWordIndex] = useState(0);
   const [input, setInput] = useState("");
@@ -61,16 +78,23 @@ export function App() {
   const [wordResults, setWordResults] = useState<WordResult[]>([]);
   const [sessionResult, setSessionResult] = useState<SessionResult | null>(null);
 
-  // Learn mode: words missed on first try, to retest at end
+  // Learn mode
   const [learnRetestQueue, setLearnRetestQueue] = useState<WordFromApi[]>([]);
   const [inRetest, setInRetest] = useState(false);
 
-  // Practice mode: words missed, to cycle back
+  // Practice mode
   const [practiceMissedQueue, setPracticeMissedQueue] = useState<WordFromApi[]>([]);
 
-  // Test mode: replay count
+  // Test mode replay limit
   const [testReplaysUsed, setTestReplaysUsed] = useState(0);
-  const TEST_MAX_REPLAYS = 1;
+
+  // Lives
+  const [lives, setLives] = useState(LIVES_PRACTICE);
+  const [livesMax, setLivesMax] = useState(LIVES_PRACTICE);
+  const [livesRecovered, setLivesRecovered] = useState(false);
+
+  // Pick spelling stage index
+  const [pickSpellingIndex, setPickSpellingIndex] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -86,7 +110,6 @@ export function App() {
         setCurrentLevel(placement.currentLevel);
 
         if (!placement.taken) {
-          // Need placement test
           const quiz = await fetchPlacementQuiz();
           setPlacementWords(quiz.words);
           setWordIndex(0);
@@ -99,48 +122,134 @@ export function App() {
         }
       } catch (err) {
         console.error("Boot failed:", err);
-        // Fall back to home screen
         setScreen("home");
       }
     }
     boot();
   }, []);
 
-  // Focus input when word changes
+  // Current word for placement or hear_and_spell/pick_spelling stages
   const currentWord =
     screen === "placement"
       ? placementWords[wordIndex] ?? null
-      : sessionWords[wordIndex] ?? null;
+      : sessionStage === "pick_spelling"
+        ? sessionWords[pickSpellingIndex] ?? null
+        : sessionWords[wordIndex] ?? null;
 
+  // Focus input when word changes (hear_and_spell / placement)
   useEffect(() => {
     if (!currentWord) return;
+    if (sessionStage !== "hear_and_spell" && screen !== "placement") return;
     const t = setTimeout(() => inputRef.current?.focus(), 100);
     return () => clearTimeout(t);
-  }, [currentWord, wordIndex]);
+  }, [currentWord, wordIndex, sessionStage, screen]);
 
   // ── Shared helpers ──
   const hearWord = useCallback(() => {
     if (!currentWord) return;
-    // In test mode, limit replays
     if (screen === "session" && sessionMode === "test") {
-      if (testReplaysUsed >= TEST_MAX_REPLAYS && phase === "ready") {
-        return; // exhausted replays
-      }
-      if (phase === "ready") {
-        setTestReplaysUsed((n) => n + 1);
-      }
+      if (testReplaysUsed >= TEST_MAX_REPLAYS && phase === "ready") return;
+      if (phase === "ready") setTestReplaysUsed((n) => n + 1);
     }
-    const text = currentWord.pronunciationOverride ?? currentWord.pronunciation_override ?? currentWord.word;
+    const text =
+      currentWord.pronunciationOverride ??
+      currentWord.pronunciation_override ??
+      currentWord.word;
     speak(text);
   }, [currentWord, screen, sessionMode, testReplaysUsed, phase]);
 
-  // ── Placement quiz logic ──
+  // ── Start a session ──
+  const startSession = useCallback(async (mode: SessionMode) => {
+    try {
+      const data = await fetchSessionWords(mode, 10);
+      setSessionMode(mode);
+      setSessionWords(data.words);
+      setCurrentLevel(data.currentLevel);
+      setWordIndex(0);
+      setInput("");
+      setPhase("ready");
+      setWordResults([]);
+      setLearnRetestQueue([]);
+      setInRetest(false);
+      setPracticeMissedQueue([]);
+      setTestReplaysUsed(0);
+      setPickSpellingIndex(0);
+      setSessionResult(null);
+
+      // Set lives and initial stage based on mode
+      if (mode === "learn") {
+        setLives(Infinity);
+        setLivesMax(0); // no hearts display
+        setSessionStage(data.words.length > 0 ? "match" : "hear_and_spell");
+      } else if (mode === "practice") {
+        setLives(LIVES_PRACTICE);
+        setLivesMax(LIVES_PRACTICE);
+        setSessionStage(data.words.length > 0 ? "match" : "hear_and_spell");
+      } else {
+        setLives(LIVES_TEST);
+        setLivesMax(LIVES_TEST);
+        setSessionStage("hear_and_spell");
+      }
+      setLivesRecovered(false);
+      setScreen("session");
+    } catch (err) {
+      console.error("Failed to start session:", err);
+    }
+  }, []);
+
+  // ── Match exercise complete ──
+  const handleMatchComplete = useCallback(() => {
+    if (sessionMode === "learn") {
+      setSessionStage("pick_spelling");
+      setPickSpellingIndex(0);
+    } else {
+      setSessionStage("hear_and_spell");
+      setWordIndex(0);
+      setInput("");
+      setPhase("ready");
+    }
+  }, [sessionMode]);
+
+  // ── Pick spelling complete for one word ──
+  const handlePickComplete = useCallback(
+    async (isCorrect: boolean, answerGiven: string) => {
+      const pickWord = sessionWords[pickSpellingIndex];
+      if (!pickWord) return;
+
+      try {
+        await postAttempt({
+          wordId: pickWord.id,
+          correct: isCorrect,
+          answerGiven,
+          exerciseType: "pick_correct_spelling",
+          mode: "learn",
+        });
+        const newStats = await fetchStats();
+        setStats(newStats);
+      } catch (err) {
+        console.error("Failed to record pick attempt:", err);
+      }
+
+      const nextIdx = pickSpellingIndex + 1;
+      if (nextIdx < sessionWords.length) {
+        setPickSpellingIndex(nextIdx);
+      } else {
+        // All pick-spelling done, move to hear_and_spell
+        setSessionStage("hear_and_spell");
+        setWordIndex(0);
+        setInput("");
+        setPhase("ready");
+      }
+    },
+    [pickSpellingIndex, sessionWords],
+  );
+
+  // ── Placement quiz ──
   const handlePlacementAnswer = useCallback(async () => {
     if (!input.trim() || !currentWord) return;
     const isCorrect = input.trim().toLowerCase() === currentWord.word.toLowerCase();
     setCorrect(isCorrect);
     setPhase("answered");
-
     setWordResults((prev) => [
       ...prev,
       { word: currentWord, correct: isCorrect, answerGiven: input.trim() },
@@ -154,14 +263,12 @@ export function App() {
       setInput("");
       setPhase("ready");
     } else {
-      // Quiz complete — score it
       try {
         const results = wordResults.map((r) => ({
           wordId: r.word.id,
           grade: r.word.grade,
           correct: r.correct,
         }));
-        // Include the last answer we just recorded
         const lastWord = placementWords[wordIndex];
         if (lastWord && !results.find((r) => r.wordId === lastWord.id)) {
           results.push({
@@ -180,49 +287,22 @@ export function App() {
     }
   }, [wordIndex, placementWords, wordResults, correct]);
 
-  // ── Start a session ──
-  const startSession = useCallback(
-    async (mode: SessionMode) => {
-      try {
-        const limit = mode === "test" ? 10 : 10;
-        const data = await fetchSessionWords(mode, limit);
-        setSessionMode(mode);
-        setSessionWords(data.words);
-        setCurrentLevel(data.currentLevel);
-        setWordIndex(0);
-        setInput("");
-        setPhase("ready");
-        setWordResults([]);
-        setLearnRetestQueue([]);
-        setInRetest(false);
-        setPracticeMissedQueue([]);
-        setTestReplaysUsed(0);
-        setScreen("session");
-      } catch (err) {
-        console.error("Failed to start session:", err);
-      }
-    },
-    [],
-  );
-
-  // ── Session answer logic ──
+  // ── Session: check answer (hear_and_spell) ──
   const checkAnswer = useCallback(async () => {
     if (!input.trim() || !currentWord) return;
     const isCorrect = input.trim().toLowerCase() === currentWord.word.toLowerCase();
     setCorrect(isCorrect);
     setPhase("answered");
 
-    // In learn mode, wrong answers are no-penalty — just mark for retest
-    if (sessionMode === "learn" && !isCorrect) {
-      if (!inRetest) {
-        setLearnRetestQueue((prev) => {
-          if (prev.find((w) => w.id === currentWord.id)) return prev;
-          return [...prev, currentWord];
-        });
-      }
+    // Learn mode: queue missed for retest
+    if (sessionMode === "learn" && !isCorrect && !inRetest) {
+      setLearnRetestQueue((prev) => {
+        if (prev.find((w) => w.id === currentWord.id)) return prev;
+        return [...prev, currentWord];
+      });
     }
 
-    // In practice mode, missed words cycle back
+    // Practice mode: queue missed to cycle back
     if (sessionMode === "practice" && !isCorrect) {
       setPracticeMissedQueue((prev) => {
         if (prev.find((w) => w.id === currentWord.id)) return prev;
@@ -230,7 +310,12 @@ export function App() {
       });
     }
 
-    // Record the attempt (except in learn mode retries — still record)
+    // Deduct a life on wrong answer in Practice/Test
+    if (!isCorrect && sessionMode !== "learn") {
+      setLives((prev) => prev - 1);
+    }
+
+    // Record attempt
     try {
       const result = await postAttempt({
         wordId: currentWord.id,
@@ -239,11 +324,8 @@ export function App() {
         exerciseType: "hear_and_spell",
         mode: sessionMode,
       });
-
-      // Update stats
       const newStats = await fetchStats();
       setStats(newStats);
-
       if (result.pointsAwarded > 0) {
         setPointsFlash(result.pointsAwarded);
         setTimeout(() => setPointsFlash(null), 1200);
@@ -252,54 +334,45 @@ export function App() {
       console.error("Failed to record attempt:", err);
     }
 
-    // Track result
+    // Track result (only hear_and_spell feeds session scoring)
     setWordResults((prev) => [
       ...prev,
       { word: currentWord, correct: isCorrect, answerGiven: input.trim() },
     ]);
   }, [input, currentWord, sessionMode, inRetest]);
 
+  // ── Finish session helper ──
+  const finishSession = useCallback(async () => {
+    try {
+      const totalWords = wordResults.length;
+      const correctCount = wordResults.filter((r) => r.correct).length;
+      if (totalWords > 0) {
+        const result = await postSession({
+          mode: sessionMode,
+          totalWords,
+          correctCount,
+        });
+        setSessionResult(result);
+        setCurrentLevel(result.levelAfter);
+      }
+    } catch (err) {
+      console.error("Failed to record session:", err);
+    }
+    setScreen("session-results");
+  }, [wordResults, sessionMode]);
+
+  // ── Next word (hear_and_spell) ──
   const nextWord = useCallback(async () => {
-    // In learn mode, wrong answer = try again (don't advance)
+    // Learn mode: wrong answer = try again
     if (sessionMode === "learn" && !correct && phase === "answered") {
       setInput("");
       setPhase("ready");
       return;
     }
 
-    const nextIdx = wordIndex + 1;
-    const wordsArray = sessionWords;
-
-    if (nextIdx < wordsArray.length) {
-      setWordIndex(nextIdx);
-      setInput("");
-      setPhase("ready");
-      setTestReplaysUsed(0);
-    } else {
-      // End of word list
-
-      // Learn mode: check if there are missed words to retest
-      if (sessionMode === "learn" && !inRetest && learnRetestQueue.length > 0) {
-        setSessionWords(learnRetestQueue);
-        setLearnRetestQueue([]);
-        setWordIndex(0);
-        setInput("");
-        setPhase("ready");
-        setInRetest(true);
-        return;
-      }
-
-      // Practice mode: cycle missed words back
-      if (sessionMode === "practice" && practiceMissedQueue.length > 0) {
-        setSessionWords(practiceMissedQueue);
-        setPracticeMissedQueue([]);
-        setWordIndex(0);
-        setInput("");
-        setPhase("ready");
-        return;
-      }
-
-      // Session complete — record it
+    // Check for out-of-lives before advancing
+    if (lives <= 0 && sessionMode !== "learn") {
+      // Record session so far
       try {
         const totalWords = wordResults.length;
         const correctCount = wordResults.filter((r) => r.correct).length;
@@ -315,8 +388,43 @@ export function App() {
       } catch (err) {
         console.error("Failed to record session:", err);
       }
+      setSessionStage("out_of_lives");
+      return;
+    }
 
-      setScreen("session-results");
+    const nextIdx = wordIndex + 1;
+
+    if (nextIdx < sessionWords.length) {
+      setWordIndex(nextIdx);
+      setInput("");
+      setPhase("ready");
+      setTestReplaysUsed(0);
+    } else {
+      // End of word list
+
+      // Learn mode: retest missed
+      if (sessionMode === "learn" && !inRetest && learnRetestQueue.length > 0) {
+        setSessionWords(learnRetestQueue);
+        setLearnRetestQueue([]);
+        setWordIndex(0);
+        setInput("");
+        setPhase("ready");
+        setInRetest(true);
+        return;
+      }
+
+      // Practice mode: cycle missed words
+      if (sessionMode === "practice" && practiceMissedQueue.length > 0) {
+        setSessionWords(practiceMissedQueue);
+        setPracticeMissedQueue([]);
+        setWordIndex(0);
+        setInput("");
+        setPhase("ready");
+        return;
+      }
+
+      // Session complete
+      await finishSession();
     }
   }, [
     wordIndex,
@@ -327,9 +435,21 @@ export function App() {
     inRetest,
     learnRetestQueue,
     practiceMissedQueue,
+    lives,
     wordResults,
+    finishSession,
   ]);
 
+  // ── Recovery from out-of-lives ──
+  const handleRecovery = useCallback(() => {
+    setLives(RECOVERY_LIVES);
+    setLivesRecovered(true);
+    setSessionStage("hear_and_spell");
+    setInput("");
+    setPhase("ready");
+  }, []);
+
+  // ── Keyboard handler ──
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter") {
@@ -345,13 +465,28 @@ export function App() {
     [phase, screen, handlePlacementAnswer, checkAnswer, nextPlacementWord, nextWord],
   );
 
-  // ── Header (shared) ──
+  // ── Shared header ──
   const header = (
     <header className="header">
       <img src="/logo-square.png" alt="Family Spelling" className="logo" />
       <h1 className="title">Spelling</h1>
     </header>
   );
+
+  // ── Hearts display ──
+  const heartsDisplay =
+    sessionMode !== "learn" && livesMax > 0 ? (
+      <div className="hearts">
+        {Array.from({ length: livesMax }).map((_, i) => (
+          <span
+            key={i}
+            className={`heart ${i < lives ? "heart-full" : "heart-empty"}`}
+          >
+            &#9829;
+          </span>
+        ))}
+      </div>
+    ) : null;
 
   // ────────────────────────────────────────
   // LOADING
@@ -420,7 +555,9 @@ export function App() {
               )}
 
               {phase === "answered" && (
-                <div className={`result ${correct ? "result-correct" : "result-wrong"}`}>
+                <div
+                  className={`result ${correct ? "result-correct" : "result-wrong"}`}
+                >
                   <p className="result-text">
                     {correct ? "Correct!" : "Not quite."}
                   </p>
@@ -429,8 +566,14 @@ export function App() {
                       The answer is: <strong>{currentWord.word}</strong>
                     </p>
                   )}
-                  <button className="btn btn-next" onClick={nextPlacementWord} type="button">
-                    {wordIndex + 1 < placementWords.length ? "Next word" : "See results"}
+                  <button
+                    className="btn btn-next"
+                    onClick={nextPlacementWord}
+                    type="button"
+                  >
+                    {wordIndex + 1 < placementWords.length
+                      ? "Next word"
+                      : "See results"}
                   </button>
                 </div>
               )}
@@ -453,11 +596,12 @@ export function App() {
             Placement Complete
           </p>
           <p className="placement-level-result">
-            Your starting level: <strong>{placementResults.placementLevel}</strong>
+            Your starting level:{" "}
+            <strong>{placementResults.placementLevel}</strong>
           </p>
           <p className="placement-accuracy">
-            {placementResults.totalCorrect} / {placementResults.totalWords} correct (
-            {placementResults.overallAccuracy}%)
+            {placementResults.totalCorrect} / {placementResults.totalWords}{" "}
+            correct ({placementResults.overallAccuracy}%)
           </p>
 
           <div className="band-scores">
@@ -528,7 +672,7 @@ export function App() {
             Practice
           </button>
           <p className="mode-desc">
-            Review words you've learned. Wrong answers cost points.
+            Review words you've learned. Wrong answers cost points and lives.
           </p>
 
           <button
@@ -547,9 +691,130 @@ export function App() {
   }
 
   // ────────────────────────────────────────
-  // SESSION (Learn / Practice / Test)
+  // SESSION
   // ────────────────────────────────────────
   if (screen === "session") {
+    const modeBadge =
+      sessionMode === "learn"
+        ? "Learn"
+        : sessionMode === "practice"
+          ? "Practice"
+          : "Test";
+
+    // ── MATCH STAGE ──
+    if (sessionStage === "match") {
+      return (
+        <div className="app">
+          {header}
+          <div className="stats-bar">
+            <div className="stat">
+              <span className="stat-value">{stats.totalPoints}</span>
+              <span className="stat-label">XP</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{stats.currentStreak}</span>
+              <span className="stat-label">day streak</span>
+            </div>
+          </div>
+          <main className="card">
+            <div className="session-header">
+              <span className={`mode-badge mode-${sessionMode}`}>
+                {modeBadge}
+              </span>
+              <span className="stage-label">Match words to definitions</span>
+            </div>
+            <MatchExercise
+              words={sessionWords}
+              mode={sessionMode as "learn" | "practice"}
+              onComplete={handleMatchComplete}
+              onStatsUpdate={setStats}
+            />
+          </main>
+        </div>
+      );
+    }
+
+    // ── PICK SPELLING STAGE ──
+    if (sessionStage === "pick_spelling") {
+      const pickWord = sessionWords[pickSpellingIndex];
+      if (!pickWord) {
+        // Shouldn't happen, but gracefully advance
+        setSessionStage("hear_and_spell");
+        setWordIndex(0);
+        setInput("");
+        setPhase("ready");
+        return null;
+      }
+
+      return (
+        <div className="app">
+          {header}
+          <div className="stats-bar">
+            <div className="stat">
+              <span className="stat-value">{stats.totalPoints}</span>
+              <span className="stat-label">XP</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{stats.currentStreak}</span>
+              <span className="stat-label">day streak</span>
+            </div>
+          </div>
+          <main className="card">
+            <div className="session-header">
+              <span className={`mode-badge mode-${sessionMode}`}>
+                {modeBadge}
+              </span>
+              <span className="word-progress">
+                {pickSpellingIndex + 1} / {sessionWords.length}
+              </span>
+            </div>
+            <p className="stage-label">Pick the correct spelling</p>
+            <PickSpelling
+              word={pickWord}
+              onComplete={handlePickComplete}
+            />
+          </main>
+        </div>
+      );
+    }
+
+    // ── OUT OF LIVES ──
+    if (sessionStage === "out_of_lives") {
+      const totalWords = wordResults.length;
+      const correctCount = wordResults.filter((r) => r.correct).length;
+
+      return (
+        <div className="app">
+          {header}
+          <main className="card">
+            <p className="out-of-lives-heading">Out of lives!</p>
+            <div className="session-score">
+              <span className="score-detail">
+                {correctCount} / {totalWords} correct so far
+              </span>
+            </div>
+            {!livesRecovered && (
+              <button
+                className="btn btn-learn"
+                onClick={handleRecovery}
+                type="button"
+              >
+                Continue (+{RECOVERY_LIVES} lives)
+              </button>
+            )}
+            <button
+              className="btn btn-next"
+              onClick={() => setScreen("session-results")}
+              type="button"
+            >
+              End session
+            </button>
+          </main>
+        </div>
+      );
+    }
+
+    // ── HEAR AND SPELL STAGE ──
     if (!currentWord) {
       return (
         <div className="app">
@@ -568,16 +833,11 @@ export function App() {
     }
 
     const progress = `${wordIndex + 1} / ${sessionWords.length}`;
-    const modeBadge =
-      sessionMode === "learn"
-        ? "Learn"
-        : sessionMode === "practice"
-          ? "Practice"
-          : "Test";
-
     const showDefinition = sessionMode !== "test";
     const canReplay =
-      sessionMode !== "test" || testReplaysUsed < TEST_MAX_REPLAYS || phase === "answered";
+      sessionMode !== "test" ||
+      testReplaysUsed < TEST_MAX_REPLAYS ||
+      phase === "answered";
 
     return (
       <div className="app">
@@ -595,11 +855,14 @@ export function App() {
             <span className="stat-value">{stats.currentStreak}</span>
             <span className="stat-label">day streak</span>
           </div>
+          {heartsDisplay}
         </div>
 
         <main className="card">
           <div className="session-header">
-            <span className={`mode-badge mode-${sessionMode}`}>{modeBadge}</span>
+            <span className={`mode-badge mode-${sessionMode}`}>
+              {modeBadge}
+            </span>
             <span className="word-progress">{progress}</span>
             {inRetest && <span className="retest-badge">Retest</span>}
           </div>
@@ -648,7 +911,9 @@ export function App() {
           )}
 
           {phase === "answered" && (
-            <div className={`result ${correct ? "result-correct" : "result-wrong"}`}>
+            <div
+              className={`result ${correct ? "result-correct" : "result-wrong"}`}
+            >
               <p className="result-text">
                 {correct ? "Correct!" : "Not quite."}
               </p>
@@ -664,7 +929,8 @@ export function App() {
                     ? "Next word"
                     : sessionMode === "learn" && learnRetestQueue.length > 0
                       ? "Start retest"
-                      : sessionMode === "practice" && practiceMissedQueue.length > 0
+                      : sessionMode === "practice" &&
+                          practiceMissedQueue.length > 0
                         ? "Review missed words"
                         : "Finish"}
               </button>
@@ -681,7 +947,8 @@ export function App() {
   if (screen === "session-results") {
     const totalWords = wordResults.length;
     const correctCount = wordResults.filter((r) => r.correct).length;
-    const accuracy = totalWords > 0 ? Math.round((correctCount / totalWords) * 100) : 0;
+    const accuracy =
+      totalWords > 0 ? Math.round((correctCount / totalWords) * 100) : 0;
     const missed = wordResults.filter((r) => !r.correct);
 
     return (
@@ -690,7 +957,12 @@ export function App() {
 
         <main className="card">
           <p className="result-text" style={{ color: "var(--color-main)" }}>
-            {sessionMode === "test" ? "Test" : sessionMode === "learn" ? "Learn" : "Practice"} Complete
+            {sessionMode === "test"
+              ? "Test"
+              : sessionMode === "learn"
+                ? "Learn"
+                : "Practice"}{" "}
+            Complete
           </p>
 
           <div className="session-score">
@@ -701,8 +973,11 @@ export function App() {
           </div>
 
           {sessionResult && sessionResult.levelDirection !== "hold" && (
-            <p className={`level-change level-${sessionResult.levelDirection}`}>
-              Level {sessionResult.levelDirection === "up" ? "up" : "down"}: {sessionResult.levelBefore} → {sessionResult.levelAfter}
+            <p
+              className={`level-change level-${sessionResult.levelDirection}`}
+            >
+              Level {sessionResult.levelDirection === "up" ? "up" : "down"}:{" "}
+              {sessionResult.levelBefore} → {sessionResult.levelAfter}
             </p>
           )}
 
@@ -733,7 +1008,6 @@ export function App() {
     );
   }
 
-  // Fallback
   return (
     <div className="app">
       {header}
