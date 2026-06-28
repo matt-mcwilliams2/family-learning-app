@@ -137,10 +137,22 @@ CREATE TABLE IF NOT EXISTS word_introductions (
 );
 `;
 
+const UP_004 = `
+-- Earned badges per user per app.
+CREATE TABLE IF NOT EXISTS user_badges (
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  badge_id   TEXT NOT NULL,
+  app        TEXT NOT NULL DEFAULT 'spelling',
+  earned_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, badge_id, app)
+);
+`;
+
 const MIGRATIONS: Migration[] = [
   { name: "001_initial_schema", sql: UP },
   { name: "002_mastery_and_sessions", sql: UP_002 },
   { name: "003_placement_and_introductions", sql: UP_003 },
+  { name: "004_badges", sql: UP_004 },
 ];
 
 async function migrate() {

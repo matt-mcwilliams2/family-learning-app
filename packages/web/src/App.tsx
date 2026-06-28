@@ -6,15 +6,19 @@ import {
   scorePlacement,
   fetchSessionWords,
   fetchStats,
+  fetchBadges,
   postAttempt,
   postSession,
   type WordFromApi,
   type Stats,
+  type Badge,
   type PlacementScoreResult,
   type SessionResult,
 } from "./api";
 import { PickSpelling } from "./PickSpelling";
 import { MatchExercise } from "./MatchExercise";
+import { MissingLetters } from "./MissingLetters";
+import { LetterTray } from "./LetterTray";
 import "./App.css";
 
 // ────────────────────────────────────────────────
@@ -33,6 +37,8 @@ type SessionMode = "learn" | "practice" | "test";
 type SessionStage =
   | "match"
   | "pick_spelling"
+  | "missing_letters"
+  | "letter_tray"
   | "hear_and_spell"
   | "out_of_lives";
 
@@ -96,17 +102,32 @@ export function App() {
   // Pick spelling stage index
   const [pickSpellingIndex, setPickSpellingIndex] = useState(0);
 
+  // Missing letters stage index
+  const [missingLettersIndex, setMissingLettersIndex] = useState(0);
+
+  // Letter tray stage index
+  const [letterTrayIndex, setLetterTrayIndex] = useState(0);
+
+  // Badges
+  const [badges, setBadges] = useState<Badge[]>([]);
+  const [newBadgeFlash, setNewBadgeFlash] = useState<{
+    name: string;
+    icon: string;
+  } | null>(null);
+
   const inputRef = useRef<HTMLInputElement>(null);
 
   // ── Bootstrap ──
   useEffect(() => {
     async function boot() {
       try {
-        const [placement, s] = await Promise.all([
+        const [placement, s, b] = await Promise.all([
           fetchPlacementStatus(),
           fetchStats(),
+          fetchBadges(),
         ]);
         setStats(s);
+        setBadges(b);
         setCurrentLevel(placement.currentLevel);
 
         if (!placement.taken) {
@@ -128,13 +149,17 @@ export function App() {
     boot();
   }, []);
 
-  // Current word for placement or hear_and_spell/pick_spelling stages
+  // Current word for placement or exercise stages
   const currentWord =
     screen === "placement"
       ? placementWords[wordIndex] ?? null
       : sessionStage === "pick_spelling"
         ? sessionWords[pickSpellingIndex] ?? null
-        : sessionWords[wordIndex] ?? null;
+        : sessionStage === "missing_letters"
+          ? sessionWords[missingLettersIndex] ?? null
+          : sessionStage === "letter_tray"
+            ? sessionWords[letterTrayIndex] ?? null
+            : sessionWords[wordIndex] ?? null;
 
   // Focus input when word changes (hear_and_spell / placement)
   useEffect(() => {
@@ -174,6 +199,8 @@ export function App() {
       setPracticeMissedQueue([]);
       setTestReplaysUsed(0);
       setPickSpellingIndex(0);
+      setMissingLettersIndex(0);
+      setLetterTrayIndex(0);
       setSessionResult(null);
 
       // Set lives and initial stage based on mode
@@ -234,14 +261,95 @@ export function App() {
       if (nextIdx < sessionWords.length) {
         setPickSpellingIndex(nextIdx);
       } else {
-        // All pick-spelling done, move to hear_and_spell
+        // All pick-spelling done, move to missing_letters
+        setSessionStage("missing_letters");
+        setMissingLettersIndex(0);
+      }
+    },
+    [pickSpellingIndex, sessionWords],
+  );
+
+  // ── Badge flash helper ──
+  const flashBadge = useCallback(
+    (badge: { name: string; icon: string }) => {
+      setNewBadgeFlash(badge);
+      setTimeout(() => setNewBadgeFlash(null), 3000);
+      // Refresh badge list
+      fetchBadges().then(setBadges).catch(console.error);
+    },
+    [],
+  );
+
+  // ── Missing letters complete for one word ──
+  const handleMissingLettersComplete = useCallback(
+    async (isCorrect: boolean, answerGiven: string) => {
+      const mlWord = sessionWords[missingLettersIndex];
+      if (!mlWord) return;
+
+      try {
+        const result = await postAttempt({
+          wordId: mlWord.id,
+          correct: isCorrect,
+          answerGiven,
+          exerciseType: "missing_letters",
+          mode: "learn",
+        });
+        const newStats = await fetchStats();
+        setStats(newStats);
+        if (result.newBadges && result.newBadges.length > 0) {
+          flashBadge(result.newBadges[0]);
+        }
+      } catch (err) {
+        console.error("Failed to record missing letters attempt:", err);
+      }
+
+      const nextIdx = missingLettersIndex + 1;
+      if (nextIdx < sessionWords.length) {
+        setMissingLettersIndex(nextIdx);
+      } else {
+        // All missing-letters done, move to letter_tray
+        setSessionStage("letter_tray");
+        setLetterTrayIndex(0);
+      }
+    },
+    [missingLettersIndex, sessionWords, flashBadge],
+  );
+
+  // ── Letter tray complete for one word ──
+  const handleLetterTrayComplete = useCallback(
+    async (isCorrect: boolean, answerGiven: string) => {
+      const ltWord = sessionWords[letterTrayIndex];
+      if (!ltWord) return;
+
+      try {
+        const result = await postAttempt({
+          wordId: ltWord.id,
+          correct: isCorrect,
+          answerGiven,
+          exerciseType: "letter_tray",
+          mode: "learn",
+        });
+        const newStats = await fetchStats();
+        setStats(newStats);
+        if (result.newBadges && result.newBadges.length > 0) {
+          flashBadge(result.newBadges[0]);
+        }
+      } catch (err) {
+        console.error("Failed to record letter tray attempt:", err);
+      }
+
+      const nextIdx = letterTrayIndex + 1;
+      if (nextIdx < sessionWords.length) {
+        setLetterTrayIndex(nextIdx);
+      } else {
+        // All letter-tray done, move to hear_and_spell
         setSessionStage("hear_and_spell");
         setWordIndex(0);
         setInput("");
         setPhase("ready");
       }
     },
-    [pickSpellingIndex, sessionWords],
+    [letterTrayIndex, sessionWords, flashBadge],
   );
 
   // ── Placement quiz ──
@@ -330,6 +438,9 @@ export function App() {
         setPointsFlash(result.pointsAwarded);
         setTimeout(() => setPointsFlash(null), 1200);
       }
+      if (result.newBadges && result.newBadges.length > 0) {
+        flashBadge(result.newBadges[0]);
+      }
     } catch (err) {
       console.error("Failed to record attempt:", err);
     }
@@ -354,12 +465,15 @@ export function App() {
         });
         setSessionResult(result);
         setCurrentLevel(result.levelAfter);
+        if (result.newBadges && result.newBadges.length > 0) {
+          flashBadge(result.newBadges[0]);
+        }
       }
     } catch (err) {
       console.error("Failed to record session:", err);
     }
     setScreen("session-results");
-  }, [wordResults, sessionMode]);
+  }, [wordResults, sessionMode, flashBadge]);
 
   // ── Next word (hear_and_spell) ──
   const nextWord = useCallback(async () => {
@@ -686,6 +800,20 @@ export function App() {
             Graded quiz. One chance per word, limited replays.
           </p>
         </main>
+
+        {badges.length > 0 && (
+          <div className="badges-section">
+            <p className="badges-heading">Badges</p>
+            <div className="badges-grid">
+              {badges.map((b) => (
+                <div key={b.id} className="badge-card">
+                  <span className={`badge-icon badge-icon-${b.icon}`} />
+                  <span className="badge-name">{b.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -778,6 +906,103 @@ export function App() {
       );
     }
 
+    // ── MISSING LETTERS STAGE ──
+    if (sessionStage === "missing_letters") {
+      const mlWord = sessionWords[missingLettersIndex];
+      if (!mlWord) {
+        setSessionStage("letter_tray");
+        setLetterTrayIndex(0);
+        return null;
+      }
+
+      return (
+        <div className="app">
+          {header}
+          <div className="stats-bar">
+            <div className="stat">
+              <span className="stat-value">{stats.totalPoints}</span>
+              <span className="stat-label">XP</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{stats.currentStreak}</span>
+              <span className="stat-label">day streak</span>
+            </div>
+          </div>
+          {newBadgeFlash && (
+            <div className="badge-flash">
+              <span className={`badge-flash-icon badge-icon-${newBadgeFlash.icon}`} />
+              <span className="badge-flash-text">{newBadgeFlash.name}</span>
+            </div>
+          )}
+          <main className="card">
+            <div className="session-header">
+              <span className={`mode-badge mode-${sessionMode}`}>
+                {modeBadge}
+              </span>
+              <span className="word-progress">
+                {missingLettersIndex + 1} / {sessionWords.length}
+              </span>
+            </div>
+            <p className="stage-label">Fill in the missing letters</p>
+            <MissingLetters
+              word={mlWord}
+              masteryScore={mlWord.masteryScore ?? 0}
+              onComplete={handleMissingLettersComplete}
+            />
+          </main>
+        </div>
+      );
+    }
+
+    // ── LETTER TRAY STAGE ──
+    if (sessionStage === "letter_tray") {
+      const ltWord = sessionWords[letterTrayIndex];
+      if (!ltWord) {
+        setSessionStage("hear_and_spell");
+        setWordIndex(0);
+        setInput("");
+        setPhase("ready");
+        return null;
+      }
+
+      return (
+        <div className="app">
+          {header}
+          <div className="stats-bar">
+            <div className="stat">
+              <span className="stat-value">{stats.totalPoints}</span>
+              <span className="stat-label">XP</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{stats.currentStreak}</span>
+              <span className="stat-label">day streak</span>
+            </div>
+          </div>
+          {newBadgeFlash && (
+            <div className="badge-flash">
+              <span className={`badge-flash-icon badge-icon-${newBadgeFlash.icon}`} />
+              <span className="badge-flash-text">{newBadgeFlash.name}</span>
+            </div>
+          )}
+          <main className="card">
+            <div className="session-header">
+              <span className={`mode-badge mode-${sessionMode}`}>
+                {modeBadge}
+              </span>
+              <span className="word-progress">
+                {letterTrayIndex + 1} / {sessionWords.length}
+              </span>
+            </div>
+            <p className="stage-label">Build the word from letters</p>
+            <LetterTray
+              word={ltWord}
+              onComplete={handleLetterTrayComplete}
+            />
+          </main>
+        </div>
+      );
+    }
+
     // ── OUT OF LIVES ──
     if (sessionStage === "out_of_lives") {
       const totalWords = wordResults.length;
@@ -857,6 +1082,13 @@ export function App() {
           </div>
           {heartsDisplay}
         </div>
+
+        {newBadgeFlash && (
+          <div className="badge-flash">
+            <span className={`badge-flash-icon badge-icon-${newBadgeFlash.icon}`} />
+            <span className="badge-flash-text">{newBadgeFlash.name}</span>
+          </div>
+        )}
 
         <main className="card">
           <div className="session-header">
@@ -981,6 +1213,21 @@ export function App() {
             </p>
           )}
 
+          {sessionResult?.newBadges && sessionResult.newBadges.length > 0 && (
+            <div className="earned-badges">
+              <p className="earned-badges-heading">Badges earned!</p>
+              {sessionResult.newBadges.map((b) => (
+                <div key={b.id} className="earned-badge-row">
+                  <span className={`badge-icon badge-icon-${b.icon}`} />
+                  <div>
+                    <span className="earned-badge-name">{b.name}</span>
+                    <span className="earned-badge-desc">{b.description}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {missed.length > 0 && (
             <div className="missed-words">
               <p className="missed-heading">Words to review:</p>
@@ -996,7 +1243,9 @@ export function App() {
           <button
             className="btn btn-check"
             onClick={() => {
-              fetchStats().then(setStats).catch(console.error);
+              Promise.all([fetchStats(), fetchBadges()])
+                .then(([s, b]) => { setStats(s); setBadges(b); })
+                .catch(console.error);
               setScreen("home");
             }}
             type="button"

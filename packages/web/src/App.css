@@ -582,3 +582,252 @@
   60% { transform: translateX(-4px); }
   80% { transform: translateX(4px); }
 }
+
+/* ---- Missing letters ---- */
+
+.missing-letters-exercise {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.missing-template {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-align: center;
+  color: var(--color-main);
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.missing-hint {
+  font-size: 13px;
+  color: #888;
+  text-align: center;
+  margin-top: -10px;
+}
+
+/* ---- Letter tray ---- */
+
+.letter-tray-exercise {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.built-word {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-height: 48px;
+}
+
+.built-slot {
+  width: 32px;
+  height: 40px;
+  border-bottom: 2px solid #d0d5dd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-main);
+  text-transform: lowercase;
+  transition: border-color 0.15s;
+}
+
+.built-filled {
+  border-color: var(--color-secondary);
+}
+
+.letter-tray {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.tray-tile {
+  width: 44px;
+  height: 48px;
+  border: 2px solid #d0d5dd;
+  border-radius: 10px;
+  background: var(--color-white);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-main);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: lowercase;
+  transition: transform 0.1s, opacity 0.2s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tray-tile:active {
+  transform: scale(0.93);
+}
+
+.tray-tile-used {
+  opacity: 0.2;
+  background: #f0f0f0;
+  cursor: default;
+}
+
+.tray-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.btn-tray-action {
+  padding: 8px 20px;
+  border: 2px solid #d0d5dd;
+  border-radius: 10px;
+  background: var(--color-white);
+  font-size: 14px;
+  font-weight: 600;
+  color: #666;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-tray-action:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* ---- Badges ---- */
+
+.badges-section {
+  width: 100%;
+  max-width: 400px;
+  margin-top: 16px;
+}
+
+.badges-heading {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-main);
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.badges-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.badge-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 80px;
+  padding: 10px 6px;
+  background: var(--color-white);
+  border-radius: 12px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+}
+
+.badge-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-main);
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* Badge icons — using pseudo-elements with emoji */
+.badge-icon {
+  display: block;
+  width: 36px;
+  height: 36px;
+  line-height: 36px;
+  text-align: center;
+  font-size: 28px;
+}
+
+.badge-icon-star::before { content: "\2B50"; }
+.badge-icon-books::before { content: "\1F4DA"; }
+.badge-icon-graduation::before { content: "\1F393"; }
+.badge-icon-trophy::before { content: "\1F3C6"; }
+.badge-icon-hundred::before { content: "\1F4AF"; }
+.badge-icon-fire::before { content: "\1F525"; }
+.badge-icon-flame::before { content: "\1F525"; }
+.badge-icon-badge::before { content: "\1F3C5"; }
+
+/* Badge flash notification */
+.badge-flash {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--color-accent);
+  border-radius: 12px;
+  animation: badge-flash-in 0.4s ease-out, badge-flash-out 0.4s ease-in 2.6s forwards;
+  margin-bottom: 8px;
+}
+
+.badge-flash-icon {
+  font-size: 24px;
+}
+
+.badge-flash-text {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-main);
+}
+
+@keyframes badge-flash-in {
+  0% { opacity: 0; transform: scale(0.8) translateY(-10px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes badge-flash-out {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Earned badges on session results */
+.earned-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #fff8e1;
+  border-radius: 12px;
+  border: 2px solid var(--color-accent);
+}
+
+.earned-badges-heading {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-accent);
+  text-align: center;
+}
+
+.earned-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.earned-badge-name {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-main);
+}
+
+.earned-badge-desc {
+  display: block;
+  font-size: 12px;
+  color: #666;
+}

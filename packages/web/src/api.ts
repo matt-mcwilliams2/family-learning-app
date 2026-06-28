@@ -6,8 +6,17 @@ export interface WordFromApi {
   example: string | null;
   syllables: string | null;
   pronunciationOverride: string | null;
+  masteryScore?: number;
   // Legacy snake_case aliases for backward compat
   pronunciation_override?: string | null;
+}
+
+export interface Badge {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  earnedAt: string;
 }
 
 export interface Stats {
@@ -24,6 +33,7 @@ export interface AttemptResult {
   masteryScore: number;
   hasEverMissed: boolean;
   nextReviewAt: string;
+  newBadges?: Array<{ id: string; name: string; description: string; icon: string }>;
 }
 
 export interface PlacementStatus {
@@ -64,6 +74,7 @@ export interface SessionResult {
   levelBefore: number;
   levelAfter: number;
   levelDirection: "up" | "down" | "hold";
+  newBadges?: Array<{ id: string; name: string; description: string; icon: string }>;
 }
 
 // Hardcoded for now — single seeded child. Real auth comes in a later slice.
@@ -162,5 +173,11 @@ export async function scorePlacement(
     body: JSON.stringify({ results }),
   });
   if (!res.ok) throw new Error("Failed to score placement");
+  return res.json();
+}
+
+export async function fetchBadges(): Promise<Badge[]> {
+  const res = await fetch(`/api/badges/${USER_ID}?app=spelling`);
+  if (!res.ok) throw new Error("Failed to load badges");
   return res.json();
 }

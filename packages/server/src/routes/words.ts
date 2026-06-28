@@ -98,10 +98,13 @@ async function getLearnWords(
     `SELECT w.id, w.word, w.grade, w.definition, w.example, w.syllables,
             w.pronunciation_override,
             COALESCE(wi.introduced, false) AS introduced,
-            COALESCE(array_length(wi.exercise_types, 1), 0) AS types_seen
+            COALESCE(array_length(wi.exercise_types, 1), 0) AS types_seen,
+            COALESCE(wm.mastery_score, 0) AS mastery_score
      FROM words w
      LEFT JOIN word_introductions wi
        ON wi.word_id = w.id AND wi.user_id = $1 AND wi.app = $2
+     LEFT JOIN word_mastery wm
+       ON wm.word_id = w.id AND wm.user_id = $1 AND wm.app = $2
      WHERE w.app = $2
        AND w.grade >= $3 AND w.grade <= $4
        AND COALESCE(wi.introduced, false) = false
@@ -128,7 +131,7 @@ async function getPracticeWords(
   const reviewResult = await pool.query(
     `SELECT w.id, w.word, w.grade, w.definition, w.example, w.syllables,
             w.pronunciation_override,
-            wm.mastery_score, wm.has_ever_missed
+            COALESCE(wm.mastery_score, 0) AS mastery_score, wm.has_ever_missed
      FROM word_mastery wm
      JOIN words w ON w.id = wm.word_id
      WHERE wm.user_id = $1 AND wm.app = $2
@@ -149,10 +152,13 @@ async function getPracticeWords(
   if (fillLimit > 0) {
     const fillResult = await pool.query(
       `SELECT w.id, w.word, w.grade, w.definition, w.example, w.syllables,
-              w.pronunciation_override
+              w.pronunciation_override,
+              COALESCE(wm.mastery_score, 0) AS mastery_score
        FROM words w
        LEFT JOIN word_introductions wi
          ON wi.word_id = w.id AND wi.user_id = $1 AND wi.app = $2
+       LEFT JOIN word_mastery wm
+         ON wm.word_id = w.id AND wm.user_id = $1 AND wm.app = $2
        WHERE w.app = $2
          AND w.grade >= $3 AND w.grade <= $4
          AND COALESCE(wi.introduced, false) = true
@@ -172,12 +178,16 @@ async function getPracticeWords(
     const extraLimit = limit - combined.length;
     const existingIds = new Set(combined.map((w: any) => w.id));
     const extraResult = await pool.query(
-      `SELECT id, word, grade, definition, example, syllables, pronunciation_override
-       FROM words
-       WHERE app = $1 AND grade >= $2 AND grade <= $3
+      `SELECT w.id, w.word, w.grade, w.definition, w.example, w.syllables,
+              w.pronunciation_override,
+              COALESCE(wm.mastery_score, 0) AS mastery_score
+       FROM words w
+       LEFT JOIN word_mastery wm
+         ON wm.word_id = w.id AND wm.user_id = $1 AND wm.app = $2
+       WHERE w.app = $2 AND w.grade >= $3 AND w.grade <= $4
        ORDER BY RANDOM()
-       LIMIT $4`,
-      [app, gradeLow, gradeHigh, extraLimit + 10],
+       LIMIT $5`,
+      [userId, app, gradeLow, gradeHigh, extraLimit + 10],
     );
     const extras = formatWords(extraResult.rows).filter(
       (w: any) => !existingIds.has(w.id),
@@ -199,10 +209,13 @@ async function getTestWords(
   // Prefer words the student has practiced but not yet tested.
   const result = await pool.query(
     `SELECT w.id, w.word, w.grade, w.definition, w.example, w.syllables,
-            w.pronunciation_override
+            w.pronunciation_override,
+            COALESCE(wm.mastery_score, 0) AS mastery_score
      FROM words w
      LEFT JOIN word_introductions wi
        ON wi.word_id = w.id AND wi.user_id = $1 AND wi.app = $2
+     LEFT JOIN word_mastery wm
+       ON wm.word_id = w.id AND wm.user_id = $1 AND wm.app = $2
      WHERE w.app = $2
        AND w.grade >= $3 AND w.grade <= $4
        AND COALESCE(wi.introduced, false) = true
@@ -216,12 +229,16 @@ async function getTestWords(
   if (words.length < limit) {
     const existingIds = new Set(words.map((w: any) => w.id));
     const fillResult = await pool.query(
-      `SELECT id, word, grade, definition, example, syllables, pronunciation_override
-       FROM words
-       WHERE app = $1 AND grade >= $2 AND grade <= $3
+      `SELECT w.id, w.word, w.grade, w.definition, w.example, w.syllables,
+              w.pronunciation_override,
+              COALESCE(wm.mastery_score, 0) AS mastery_score
+       FROM words w
+       LEFT JOIN word_mastery wm
+         ON wm.word_id = w.id AND wm.user_id = $1 AND wm.app = $2
+       WHERE w.app = $2 AND w.grade >= $3 AND w.grade <= $4
        ORDER BY RANDOM()
-       LIMIT $4`,
-      [app, gradeLow, gradeHigh, limit],
+       LIMIT $5`,
+      [userId, app, gradeLow, gradeHigh, limit],
     );
     for (const row of fillResult.rows) {
       if (!existingIds.has(row.id) && words.length < limit) {
@@ -242,6 +259,7 @@ function formatWord(row: any) {
     example: row.example,
     syllables: row.syllables,
     pronunciationOverride: row.pronunciation_override,
+    masteryScore: row.mastery_score != null ? parseFloat(row.mastery_score) : 0,
   };
 }
 

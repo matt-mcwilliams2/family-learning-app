@@ -2,6 +2,7 @@ import { Router } from "express";
 import pool from "../db.js";
 import { computeMastery, getNextReviewDate } from "@family-learning/shared";
 import type { Attempt } from "@family-learning/shared";
+import { checkAndAwardBadges } from "./badges.js";
 
 export const attemptsRouter = Router();
 
@@ -130,6 +131,11 @@ attemptsRouter.post("/", async (req, res) => {
       [userId, wordId, appName, exerciseType],
     );
 
+    // Check for newly earned badges
+    const newBadges = await checkAndAwardBadges(client, userId, appName, {
+      type: "attempt",
+    });
+
     await client.query("COMMIT");
 
     res.json({
@@ -139,6 +145,7 @@ attemptsRouter.post("/", async (req, res) => {
       masteryScore: score,
       hasEverMissed,
       nextReviewAt: nextReview.toISOString(),
+      newBadges,
     });
   } catch (err) {
     await client.query("ROLLBACK");

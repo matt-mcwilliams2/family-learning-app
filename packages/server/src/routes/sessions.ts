@@ -5,6 +5,7 @@ import {
   combinedAccuracy,
   LEVELING_CONFIG,
 } from "@family-learning/shared";
+import { checkAndAwardBadges } from "./badges.js";
 
 export const sessionsRouter = Router();
 
@@ -102,6 +103,13 @@ sessionsRouter.post("/", async (req, res) => {
       ],
     );
 
+    // Check for newly earned badges
+    const newBadges = await checkAndAwardBadges(client, userId, appName, {
+      type: "session",
+      accuracy,
+      mode,
+    });
+
     await client.query("COMMIT");
 
     res.json({
@@ -111,6 +119,7 @@ sessionsRouter.post("/", async (req, res) => {
       levelBefore: currentLevel,
       levelAfter: adjustment.newLevel,
       levelDirection: adjustment.direction,
+      newBadges,
     });
   } catch (err) {
     await client.query("ROLLBACK");
