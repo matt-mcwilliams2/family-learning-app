@@ -12,6 +12,11 @@ import {
   fetchTroubleWords,
   excuseAttempt,
   setPronunciationOverride,
+  createStudent,
+  updateStudent,
+  deactivateStudent,
+  activateStudent,
+  deleteStudent,
   type ChildSummary,
   type WordStatus,
   type TestResult,
@@ -23,7 +28,7 @@ interface TeacherDashboardProps {
   onLogout: () => void;
 }
 
-type Tab = "overview" | "words" | "tests";
+type Tab = "overview" | "words" | "tests" | "students";
 
 export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
   const [children, setChildren] = useState<ChildSummary[]>([]);
@@ -61,13 +66,37 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
   const [pronEditWordId, setPronEditWordId] = useState<number | null>(null);
   const [pronInput, setPronInput] = useState("");
 
+  // Student management state
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [addFirstName, setAddFirstName] = useState("");
+  const [addLastName, setAddLastName] = useState("");
+  const [addGradeLevel, setAddGradeLevel] = useState(6);
+  const [addUsername, setAddUsername] = useState("");
+  const [addPassword, setAddPassword] = useState("");
+  const [addStudentLoading, setAddStudentLoading] = useState(false);
+  const [addStudentMsg, setAddStudentMsg] = useState<string | null>(null);
+
+  const [editingStudentId, setEditingStudentId] = useState<number | null>(null);
+  const [editFirstName, setEditFirstName] = useState("");
+  const [editLastName, setEditLastName] = useState("");
+  const [editGradeLevel, setEditGradeLevel] = useState(6);
+  const [editUsername, setEditUsername] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [editStudentMsg, setEditStudentMsg] = useState<string | null>(null);
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+
+  // Active children only (for child selector / stats tabs)
+  const activeChildren = children.filter((c) => c.active !== false);
+
   useEffect(() => {
     fetchChildren()
       .then((c) => {
         setChildren(c);
-        if (c.length > 0) {
-          setSelectedChild(c[0]);
-          setWeeklyCount(c[0].weeklyNewWords);
+        const active = c.filter((ch) => ch.active !== false);
+        if (active.length > 0) {
+          setSelectedChild(active[0]);
+          setWeeklyCount(active[0].weeklyNewWords);
         }
         setLoading(false);
       })
@@ -280,6 +309,130 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
     [selectedChild],
   );
 
+  // ── Student management handlers ──
+  const refreshChildren = useCallback(async () => {
+    const c = await fetchChildren();
+    setChildren(c);
+    return c;
+  }, []);
+
+  const handleAddStudent = useCallback(async () => {
+    if (!addFirstName.trim() || !addLastName.trim() || !addUsername.trim() || !addPassword) return;
+    setAddStudentLoading(true);
+    setAddStudentMsg(null);
+    try {
+      await createStudent({
+        firstName: addFirstName.trim(),
+        lastName: addLastName.trim(),
+        gradeLevel: addGradeLevel,
+        username: addUsername.trim(),
+        password: addPassword,
+      });
+      setAddStudentMsg("Student created.");
+      setAddFirstName("");
+      setAddLastName("");
+      setAddGradeLevel(6);
+      setAddUsername("");
+      setAddPassword("");
+      setShowAddStudent(false);
+      const updated = await refreshChildren();
+      // Select the new student if none selected
+      const active = updated.filter((ch) => ch.active !== false);
+      if (!selectedChild && active.length > 0) {
+        setSelectedChild(active[0]);
+        setWeeklyCount(active[0].weeklyNewWords);
+      }
+    } catch (err: any) {
+      setAddStudentMsg(err.message || "Failed to create student.");
+    } finally {
+      setAddStudentLoading(false);
+    }
+  }, [addFirstName, addLastName, addGradeLevel, addUsername, addPassword, selectedChild, refreshChildren]);
+
+  const handleEditStudent = useCallback(
+    async (studentId: number) => {
+      setEditStudentMsg(null);
+      try {
+        await updateStudent(studentId, {
+          firstName: editFirstName.trim(),
+          lastName: editLastName.trim(),
+          gradeLevel: editGradeLevel,
+          username: editUsername.trim(),
+          password: editPassword || undefined,
+        });
+        setEditingStudentId(null);
+        const updated = await refreshChildren();
+        // Update selectedChild if it was the one edited
+        if (selectedChild?.id === studentId) {
+          const found = updated.find((c) => c.id === studentId);
+          if (found) {
+            setSelectedChild(found);
+            setWeeklyCount(found.weeklyNewWords);
+          }
+        }
+      } catch (err: any) {
+        setEditStudentMsg(err.message || "Failed to update student.");
+      }
+    },
+    [editFirstName, editLastName, editGradeLevel, editUsername, editPassword, selectedChild, refreshChildren],
+  );
+
+  const handleDeactivate = useCallback(
+    async (studentId: number) => {
+      try {
+        await deactivateStudent(studentId);
+        const updated = await refreshChildren();
+        // If deactivated child was selected, switch to first active
+        if (selectedChild?.id === studentId) {
+          const active = updated.filter((c) => c.active !== false);
+          setSelectedChild(active.length > 0 ? active[0] : null);
+        }
+      } catch (err) {
+        console.error("Failed to deactivate student:", err);
+      }
+    },
+    [selectedChild, refreshChildren],
+  );
+
+  const handleActivate = useCallback(
+    async (studentId: number) => {
+      try {
+        await activateStudent(studentId);
+        await refreshChildren();
+      } catch (err) {
+        console.error("Failed to activate student:", err);
+      }
+    },
+    [refreshChildren],
+  );
+
+  const handleDeleteStudent = useCallback(
+    async (studentId: number) => {
+      try {
+        await deleteStudent(studentId);
+        setConfirmDeleteId(null);
+        const updated = await refreshChildren();
+        if (selectedChild?.id === studentId) {
+          const active = updated.filter((c) => c.active !== false);
+          setSelectedChild(active.length > 0 ? active[0] : null);
+        }
+      } catch (err) {
+        console.error("Failed to delete student:", err);
+      }
+    },
+    [selectedChild, refreshChildren],
+  );
+
+  const startEdit = useCallback((child: ChildSummary) => {
+    setEditingStudentId(child.id);
+    setEditFirstName(child.firstName ?? child.displayName.split(" ")[0] ?? "");
+    setEditLastName(child.lastName ?? child.displayName.split(" ").slice(1).join(" ") ?? "");
+    setEditGradeLevel(Math.floor(child.currentLevel));
+    setEditUsername(child.username ?? "");
+    setEditPassword("");
+    setEditStudentMsg(null);
+  }, []);
+
   const header = (
     <header className="header">
       <img src="/logo-square.png" alt="Family Spelling" className="logo" />
@@ -296,18 +449,9 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
     );
   }
 
-  if (children.length === 0) {
-    return (
-      <div className="app">
-        {header}
-        <main className="card">
-          <p className="login-sub">No children in your family yet.</p>
-        </main>
-        <button className="btn-link teacher-link" onClick={onLogout} type="button">
-          Sign out
-        </button>
-      </div>
-    );
+  // If no children at all, go straight to students tab
+  if (children.length === 0 && tab !== "students") {
+    setTab("students");
   }
 
   // Compute word status counts
@@ -320,10 +464,10 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
     <div className="app">
       {header}
 
-      {/* Child selector */}
-      {children.length > 1 && (
+      {/* Child selector (active children only) */}
+      {activeChildren.length > 1 && tab !== "students" && (
         <div className="child-selector">
-          {children.map((c) => (
+          {activeChildren.map((c) => (
             <button
               key={c.id}
               className={`child-tab ${selectedChild?.id === c.id ? "child-tab-active" : ""}`}
@@ -336,7 +480,7 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
         </div>
       )}
 
-      {selectedChild && (
+      {selectedChild && tab !== "students" && (
         <>
           {/* Stats bar */}
           <div className="stats-bar">
@@ -353,32 +497,277 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
               <span className="stat-label">level</span>
             </div>
           </div>
+        </>
+      )}
 
-          {/* Tab bar */}
-          <div className="dash-tabs">
+      {/* Tab bar */}
+      <div className="dash-tabs">
+        <button
+          className={`dash-tab ${tab === "overview" ? "dash-tab-active" : ""}`}
+          onClick={() => setTab("overview")}
+          type="button"
+          disabled={!selectedChild}
+        >
+          Overview
+        </button>
+        <button
+          className={`dash-tab ${tab === "words" ? "dash-tab-active" : ""}`}
+          onClick={() => setTab("words")}
+          type="button"
+          disabled={!selectedChild}
+        >
+          Words
+        </button>
+        <button
+          className={`dash-tab ${tab === "tests" ? "dash-tab-active" : ""}`}
+          onClick={() => setTab("tests")}
+          type="button"
+          disabled={!selectedChild}
+        >
+          Tests
+        </button>
+        <button
+          className={`dash-tab ${tab === "students" ? "dash-tab-active" : ""}`}
+          onClick={() => setTab("students")}
+          type="button"
+        >
+          Students
+        </button>
+      </div>
+
+      {/* ── STUDENTS TAB ── */}
+      {tab === "students" && (
+        <main className="card">
+          <div className="overview-section">
             <button
-              className={`dash-tab ${tab === "overview" ? "dash-tab-active" : ""}`}
-              onClick={() => setTab("overview")}
+              className="btn btn-check"
+              onClick={() => {
+                setShowAddStudent(!showAddStudent);
+                setAddStudentMsg(null);
+              }}
               type="button"
             >
-              Overview
-            </button>
-            <button
-              className={`dash-tab ${tab === "words" ? "dash-tab-active" : ""}`}
-              onClick={() => setTab("words")}
-              type="button"
-            >
-              Words
-            </button>
-            <button
-              className={`dash-tab ${tab === "tests" ? "dash-tab-active" : ""}`}
-              onClick={() => setTab("tests")}
-              type="button"
-            >
-              Tests
+              {showAddStudent ? "Cancel" : "Add Student"}
             </button>
           </div>
 
+          {showAddStudent && (
+            <div className="student-form">
+              <p className="overview-label">New Student</p>
+              {addStudentMsg && <p className="login-error">{addStudentMsg}</p>}
+              <input
+                className="login-input"
+                type="text"
+                placeholder="First name"
+                value={addFirstName}
+                onChange={(e) => setAddFirstName(e.target.value)}
+                autoComplete="off"
+              />
+              <input
+                className="login-input"
+                type="text"
+                placeholder="Last name"
+                value={addLastName}
+                onChange={(e) => setAddLastName(e.target.value)}
+                autoComplete="off"
+              />
+              <div className="student-field-row">
+                <label className="assign-test-label">
+                  Grade:
+                  <select
+                    className="grade-select"
+                    value={addGradeLevel}
+                    onChange={(e) => setAddGradeLevel(parseInt(e.target.value, 10))}
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <input
+                className="login-input"
+                type="text"
+                placeholder="Username"
+                value={addUsername}
+                onChange={(e) => setAddUsername(e.target.value)}
+                autoComplete="off"
+                autoCapitalize="off"
+              />
+              <input
+                className="login-input"
+                type="password"
+                placeholder="Password"
+                value={addPassword}
+                onChange={(e) => setAddPassword(e.target.value)}
+                autoComplete="new-password"
+              />
+              <button
+                className="btn btn-check"
+                onClick={handleAddStudent}
+                disabled={addStudentLoading || !addFirstName.trim() || !addLastName.trim() || !addUsername.trim() || !addPassword}
+                type="button"
+              >
+                {addStudentLoading ? "Creating..." : "Create Student"}
+              </button>
+            </div>
+          )}
+
+          {/* Student list */}
+          <div className="students-list">
+            {children.length === 0 && !showAddStudent && (
+              <p className="login-sub">No students yet. Add one to get started.</p>
+            )}
+            {children.map((child) => (
+              <div
+                key={child.id}
+                className={`student-row ${child.active === false ? "student-inactive" : ""}`}
+              >
+                {editingStudentId === child.id ? (
+                  <div className="student-form">
+                    <p className="overview-label">Edit Student</p>
+                    {editStudentMsg && <p className="login-error">{editStudentMsg}</p>}
+                    <input
+                      className="login-input"
+                      type="text"
+                      placeholder="First name"
+                      value={editFirstName}
+                      onChange={(e) => setEditFirstName(e.target.value)}
+                      autoComplete="off"
+                    />
+                    <input
+                      className="login-input"
+                      type="text"
+                      placeholder="Last name"
+                      value={editLastName}
+                      onChange={(e) => setEditLastName(e.target.value)}
+                      autoComplete="off"
+                    />
+                    <div className="student-field-row">
+                      <label className="assign-test-label">
+                        Grade:
+                        <select
+                          className="grade-select"
+                          value={editGradeLevel}
+                          onChange={(e) => setEditGradeLevel(parseInt(e.target.value, 10))}
+                        >
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
+                            <option key={g} value={g}>{g}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <input
+                      className="login-input"
+                      type="text"
+                      placeholder="Username"
+                      value={editUsername}
+                      onChange={(e) => setEditUsername(e.target.value)}
+                      autoComplete="off"
+                      autoCapitalize="off"
+                    />
+                    <input
+                      className="login-input"
+                      type="password"
+                      placeholder="New password (leave blank to keep)"
+                      value={editPassword}
+                      onChange={(e) => setEditPassword(e.target.value)}
+                      autoComplete="new-password"
+                    />
+                    <div className="student-edit-actions">
+                      <button
+                        className="btn btn-check btn-small"
+                        onClick={() => handleEditStudent(child.id)}
+                        disabled={!editFirstName.trim() || !editLastName.trim() || !editUsername.trim()}
+                        type="button"
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="btn-link"
+                        onClick={() => setEditingStudentId(null)}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="student-row-main">
+                      <div className="student-info">
+                        <span className="student-name">{child.displayName}</span>
+                        <span className="student-detail">
+                          @{child.username ?? "—"} &middot; Grade {Math.floor(child.currentLevel)}
+                        </span>
+                      </div>
+                      {child.active === false && (
+                        <span className="word-status-badge status-not_started">Inactive</span>
+                      )}
+                    </div>
+                    <div className="student-actions">
+                      <button
+                        className="btn-link-inline"
+                        onClick={() => startEdit(child)}
+                        type="button"
+                      >
+                        Edit
+                      </button>
+                      {child.active === false ? (
+                        <button
+                          className="btn-link-inline"
+                          onClick={() => handleActivate(child.id)}
+                          type="button"
+                        >
+                          Activate
+                        </button>
+                      ) : (
+                        <button
+                          className="btn-link-inline"
+                          onClick={() => handleDeactivate(child.id)}
+                          type="button"
+                        >
+                          Deactivate
+                        </button>
+                      )}
+                      {confirmDeleteId === child.id ? (
+                        <>
+                          <span className="login-error" style={{ fontSize: 12 }}>Delete?</span>
+                          <button
+                            className="btn-link-inline btn-danger-text"
+                            onClick={() => handleDeleteStudent(child.id)}
+                            type="button"
+                          >
+                            Yes, delete
+                          </button>
+                          <button
+                            className="btn-link-inline"
+                            onClick={() => setConfirmDeleteId(null)}
+                            type="button"
+                          >
+                            No
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="btn-link-inline btn-danger-text"
+                          onClick={() => setConfirmDeleteId(child.id)}
+                          type="button"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </main>
+      )}
+
+      {selectedChild && (
+        <>
           {/* ── OVERVIEW TAB ── */}
           {tab === "overview" && (
             <main className="card">

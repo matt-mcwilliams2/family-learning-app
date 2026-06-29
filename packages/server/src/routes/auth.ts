@@ -67,37 +67,43 @@ authRouter.post("/login", async (req, res) => {
 });
 
 // POST /api/auth/child-login
-// Body: { userId, pin }
+// Body: { username, password }
 // Returns: { token, user }
 authRouter.post("/child-login", async (req, res) => {
   try {
-    const { userId, pin } = req.body;
-    if (!userId || !pin) {
-      res.status(400).json({ error: "User ID and PIN required" });
+    const { username, password } = req.body;
+    if (!username || !password) {
+      res.status(400).json({ error: "Username and password required" });
       return;
     }
 
     const result = await pool.query(
-      `SELECT id, family_id, display_name, role, pin, current_level
+      `SELECT id, family_id, display_name, role, password_hash, current_level, active
        FROM users
-       WHERE id = $1 AND role = 'child'`,
-      [userId],
+       WHERE lower(username) = lower($1) AND role = 'child'`,
+      [username.trim()],
     );
 
     if (result.rows.length === 0) {
-      res.status(401).json({ error: "Invalid profile or PIN" });
+      res.status(401).json({ error: "Invalid username or password" });
       return;
     }
 
     const user = result.rows[0];
-    if (!user.pin) {
-      res.status(401).json({ error: "Invalid profile or PIN" });
+
+    if (user.active === false) {
+      res.status(401).json({ error: "This account has been deactivated" });
       return;
     }
 
-    const valid = await comparePassword(pin, user.pin);
+    if (!user.password_hash) {
+      res.status(401).json({ error: "Invalid username or password" });
+      return;
+    }
+
+    const valid = await comparePassword(password, user.password_hash);
     if (!valid) {
-      res.status(401).json({ error: "Invalid profile or PIN" });
+      res.status(401).json({ error: "Invalid username or password" });
       return;
     }
 
@@ -128,11 +134,11 @@ authRouter.post("/child-login", async (req, res) => {
 // Query: familyId (optional, defaults to first family)
 authRouter.get("/profiles", async (_req, res) => {
   try {
-    // For a single-family setup, just return all children
+    // For a single-family setup, return all active children
     const result = await pool.query(
       `SELECT u.id, u.display_name, u.current_level
        FROM users u
-       WHERE u.role = 'child'
+       WHERE u.role = 'child' AND u.active = true
        ORDER BY u.display_name`,
     );
 

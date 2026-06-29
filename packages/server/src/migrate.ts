@@ -179,6 +179,15 @@ CREATE INDEX IF NOT EXISTS idx_assigned_tests_child
   ON assigned_tests(child_id, status);
 `;
 
+const UP_007 = `
+-- Student management: username/password login, active flag, name fields
+ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL;
+`;
+
 const MIGRATIONS: Migration[] = [
   { name: "001_initial_schema", sql: UP },
   { name: "002_mastery_and_sessions", sql: UP_002 },
@@ -186,6 +195,7 @@ const MIGRATIONS: Migration[] = [
   { name: "004_badges", sql: UP_004 },
   { name: "005_weekly_new_words", sql: UP_005 },
   { name: "006_excluded_words_and_assigned_tests", sql: UP_006 },
+  { name: "007_student_management", sql: UP_007 },
 ];
 
 async function migrate() {

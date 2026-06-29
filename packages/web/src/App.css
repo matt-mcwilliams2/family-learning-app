@@ -1816,3 +1816,81 @@
   color: var(--color-accent);
   text-align: center;
 }
+
+/* ---- Student management ---- */
+
+.students-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.student-row {
+  padding: 12px;
+  border: 1px solid #e8ebf0;
+  border-radius: 12px;
+  background: var(--color-white);
+}
+
+.student-inactive {
+  opacity: 0.55;
+}
+
+.student-row-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.student-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.student-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-main);
+}
+
+.student-detail {
+  font-size: 12px;
+  color: #888;
+}
+
+.student-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.student-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.student-field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.student-field-row .login-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.student-field-row .grade-select {
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.student-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-danger-text {
+  color: var(--color-third) !important;
+}

@@ -1,6 +1,7 @@
 /**
- * One-time setup: creates the parent account and hashes the child's PIN.
+ * One-time setup: creates the parent account and test student.
  * Safe to run multiple times — checks for existing accounts.
+ * Migrates any existing child data to the test student.
  *
  * Usage: npx tsx src/setup-auth.ts
  */
@@ -11,6 +12,11 @@ const PARENT_EMAIL = "parent@mcwilliams.family";
 const PARENT_PASSWORD = "OwlSpell2025!";
 const PARENT_NAME = "Parent";
 const SALT_ROUNDS = 10;
+
+const TEST_USERNAME = "test123";
+const TEST_PASSWORD = "test123";
+const TEST_FIRST = "Test";
+const TEST_LAST = "Student";
 
 async function setup() {
   const client = await pool.connect();
@@ -48,28 +54,135 @@ async function setup() {
       console.log(`  Password: ${PARENT_PASSWORD}`);
     }
 
-    // Hash any plain-text child PINs
-    const children = await client.query(
-      "SELECT id, pin, display_name FROM users WHERE family_id = $1 AND role = 'child'",
-      [familyId],
+    // ── Create test student ──
+    const existingTest = await client.query(
+      "SELECT id FROM users WHERE username = $1",
+      [TEST_USERNAME],
     );
 
-    for (const child of children.rows) {
-      if (!child.pin) continue;
-      // bcrypt hashes start with "$2a$" or "$2b$". If the PIN doesn't
-      // start with "$2", it's plain text and needs hashing.
-      if (child.pin.startsWith("$2")) {
-        console.log(`Child "${child.display_name}" PIN already hashed.`);
-        continue;
-      }
-      const hashedPin = await bcrypt.hash(child.pin, SALT_ROUNDS);
-      await client.query("UPDATE users SET pin = $1 WHERE id = $2", [
-        hashedPin,
-        child.id,
-      ]);
-      console.log(
-        `Hashed PIN for child "${child.display_name}" (was: ${child.pin})`,
+    let testStudentId: number;
+
+    if (existingTest.rows.length > 0) {
+      testStudentId = existingTest.rows[0].id;
+      console.log(`Test student already exists (id=${testStudentId}), skipping creation.`);
+    } else {
+      const passwordHash = await bcrypt.hash(TEST_PASSWORD, SALT_ROUNDS);
+      const testResult = await client.query(
+        `INSERT INTO users (family_id, display_name, role, username, password_hash,
+                            first_name, last_name, current_level, active)
+         VALUES ($1, $2, 'child', $3, $4, $5, $6, 6.0, true)
+         RETURNING id`,
+        [familyId, `${TEST_FIRST} ${TEST_LAST}`, TEST_USERNAME, passwordHash, TEST_FIRST, TEST_LAST],
       );
+      testStudentId = testResult.rows[0].id;
+
+      // Create user_stats row
+      await client.query(
+        `INSERT INTO user_stats (user_id, app, total_points, current_streak, longest_streak)
+         VALUES ($1, 'spelling', 0, 0, 0)
+         ON CONFLICT (user_id, app) DO NOTHING`,
+        [testStudentId],
+      );
+
+      console.log(`Created test student id=${testStudentId}`);
+      console.log(`  Username: ${TEST_USERNAME}`);
+      console.log(`  Password: ${TEST_PASSWORD}`);
+    }
+
+    // ── Migrate existing child data to test student ──
+    const otherChildren = await client.query(
+      "SELECT id, display_name FROM users WHERE family_id = $1 AND role = 'child' AND id != $2",
+      [familyId, testStudentId],
+    );
+
+    if (otherChildren.rows.length > 0) {
+      for (const child of otherChildren.rows) {
+        const oldId = child.id;
+        console.log(`Migrating data from "${child.display_name}" (id=${oldId}) to test student...`);
+
+        // Migrate attempts
+        await client.query(
+          "UPDATE attempts SET user_id = $1 WHERE user_id = $2",
+          [testStudentId, oldId],
+        );
+
+        // Migrate sessions
+        await client.query(
+          "UPDATE sessions SET user_id = $1 WHERE user_id = $2",
+          [testStudentId, oldId],
+        );
+
+        // Migrate word_mastery (handle conflicts by keeping test student's rows)
+        await client.query(
+          `DELETE FROM word_mastery WHERE user_id = $1
+           AND (word_id, app) IN (SELECT word_id, app FROM word_mastery WHERE user_id = $2)`,
+          [oldId, testStudentId],
+        );
+        await client.query(
+          "UPDATE word_mastery SET user_id = $1 WHERE user_id = $2",
+          [testStudentId, oldId],
+        );
+
+        // Migrate word_introductions (handle conflicts)
+        await client.query(
+          `DELETE FROM word_introductions WHERE user_id = $1
+           AND (word_id, app) IN (SELECT word_id, app FROM word_introductions WHERE user_id = $2)`,
+          [oldId, testStudentId],
+        );
+        await client.query(
+          "UPDATE word_introductions SET user_id = $1 WHERE user_id = $2",
+          [testStudentId, oldId],
+        );
+
+        // Migrate user_badges (handle conflicts)
+        await client.query(
+          `DELETE FROM user_badges WHERE user_id = $1
+           AND (badge_id, app) IN (SELECT badge_id, app FROM user_badges WHERE user_id = $2)`,
+          [oldId, testStudentId],
+        );
+        await client.query(
+          "UPDATE user_badges SET user_id = $1 WHERE user_id = $2",
+          [testStudentId, oldId],
+        );
+
+        // Merge user_stats (add points, take max streaks)
+        await client.query(
+          `UPDATE user_stats SET
+            total_points = user_stats.total_points + COALESCE(old.total_points, 0),
+            current_streak = GREATEST(user_stats.current_streak, COALESCE(old.current_streak, 0)),
+            longest_streak = GREATEST(user_stats.longest_streak, COALESCE(old.longest_streak, 0)),
+            last_active = GREATEST(user_stats.last_active, old.last_active)
+           FROM user_stats old
+           WHERE user_stats.user_id = $1 AND user_stats.app = 'spelling'
+             AND old.user_id = $2 AND old.app = 'spelling'`,
+          [testStudentId, oldId],
+        );
+        await client.query(
+          "DELETE FROM user_stats WHERE user_id = $1",
+          [oldId],
+        );
+
+        // Migrate excluded_words (handle conflicts)
+        await client.query(
+          `DELETE FROM excluded_words WHERE child_id = $1
+           AND word_id IN (SELECT word_id FROM excluded_words WHERE child_id = $2)`,
+          [oldId, testStudentId],
+        );
+        await client.query(
+          "UPDATE excluded_words SET child_id = $1 WHERE child_id = $2",
+          [testStudentId, oldId],
+        );
+
+        // Migrate assigned_tests
+        await client.query(
+          "UPDATE assigned_tests SET child_id = $1 WHERE child_id = $2",
+          [testStudentId, oldId],
+        );
+
+        // Delete the old child user
+        await client.query("DELETE FROM users WHERE id = $1", [oldId]);
+        console.log(`  Deleted old child "${child.display_name}" (id=${oldId})`);
+      }
     }
 
     await client.query("COMMIT");

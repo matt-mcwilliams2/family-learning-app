@@ -1,6 +1,6 @@
 import { Router } from "express";
 import pool from "../db.js";
-import { requireAuth, requireParent } from "../auth.js";
+import { requireAuth, requireParent, hashPassword } from "../auth.js";
 import { computeMastery, getNextReviewDate } from "@family-learning/shared";
 import type { Attempt } from "@family-learning/shared";
 
@@ -92,7 +92,7 @@ teacherRouter.get("/children", async (req, res) => {
 
     const result = await pool.query(
       `SELECT u.id, u.display_name, u.current_level, u.weekly_new_words,
-              u.placement_level,
+              u.placement_level, u.username, u.first_name, u.last_name, u.active,
               us.total_points, us.current_streak, us.longest_streak, us.last_active
        FROM users u
        LEFT JOIN user_stats us ON us.user_id = u.id AND us.app = 'spelling'
@@ -113,6 +113,10 @@ teacherRouter.get("/children", async (req, res) => {
         lastActive: r.last_active,
         placementTaken: r.placement_level !== null,
         placementLevel: r.placement_level ? parseFloat(r.placement_level) : null,
+        username: r.username,
+        firstName: r.first_name,
+        lastName: r.last_name,
+        active: r.active,
       })),
     );
   } catch (err) {
@@ -819,5 +823,228 @@ teacherRouter.put("/words/:wordId/pronunciation", async (req, res) => {
   } catch (err) {
     console.error("PUT /api/teacher/words/:wordId/pronunciation error:", err);
     res.status(500).json({ error: "Failed to update pronunciation" });
+  }
+});
+
+// ── Student management ──────────────────────────────────────────
+
+// POST /api/teacher/students — Create a new student
+teacherRouter.post("/students", async (req, res) => {
+  try {
+    const { firstName, lastName, gradeLevel, username, password } = req.body;
+    if (!firstName || !lastName || !username || !password || gradeLevel == null) {
+      res.status(400).json({ error: "All fields required: firstName, lastName, gradeLevel, username, password" });
+      return;
+    }
+    if (password.length < 4) {
+      res.status(400).json({ error: "Password must be at least 4 characters" });
+      return;
+    }
+
+    // Check username uniqueness
+    const existing = await pool.query(
+      "SELECT id FROM users WHERE lower(username) = lower($1)",
+      [username.trim()],
+    );
+    if (existing.rows.length > 0) {
+      res.status(400).json({ error: "Username already taken" });
+      return;
+    }
+
+    const familyId = req.auth!.familyId;
+    const displayName = `${firstName.trim()} ${lastName.trim()}`;
+    const hashedPassword = await hashPassword(password);
+    const level = parseFloat(gradeLevel);
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const userResult = await client.query(
+        `INSERT INTO users (family_id, display_name, role, username, password_hash,
+                            first_name, last_name, current_level, active)
+         VALUES ($1, $2, 'child', $3, $4, $5, $6, $7, true)
+         RETURNING id`,
+        [familyId, displayName, username.trim(), hashedPassword,
+         firstName.trim(), lastName.trim(), level],
+      );
+      const childId = userResult.rows[0].id;
+
+      await client.query(
+        `INSERT INTO user_stats (user_id, app, total_points, current_streak, longest_streak)
+         VALUES ($1, 'spelling', 0, 0, 0)`,
+        [childId],
+      );
+
+      await client.query("COMMIT");
+
+      res.json({
+        id: childId,
+        displayName,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        username: username.trim(),
+        currentLevel: level,
+        active: true,
+      });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error("POST /api/teacher/students error:", err);
+    res.status(500).json({ error: "Failed to create student" });
+  }
+});
+
+// PUT /api/teacher/students/:studentId — Edit student info
+teacherRouter.put("/students/:studentId", async (req, res) => {
+  try {
+    const studentId = parseInt(req.params.studentId, 10);
+    const familyId = req.auth!.familyId;
+    const { firstName, lastName, gradeLevel, username, password } = req.body;
+
+    if (!firstName || !lastName || !username || gradeLevel == null) {
+      res.status(400).json({ error: "firstName, lastName, gradeLevel, username required" });
+      return;
+    }
+
+    // Verify student belongs to this family
+    const check = await pool.query(
+      "SELECT id FROM users WHERE id = $1 AND family_id = $2 AND role = 'child'",
+      [studentId, familyId],
+    );
+    if (check.rows.length === 0) {
+      res.status(404).json({ error: "Student not found" });
+      return;
+    }
+
+    // Check username uniqueness (excluding self)
+    const existing = await pool.query(
+      "SELECT id FROM users WHERE lower(username) = lower($1) AND id != $2",
+      [username.trim(), studentId],
+    );
+    if (existing.rows.length > 0) {
+      res.status(400).json({ error: "Username already taken" });
+      return;
+    }
+
+    const displayName = `${firstName.trim()} ${lastName.trim()}`;
+    const level = parseFloat(gradeLevel);
+
+    if (password && password.length > 0) {
+      if (password.length < 4) {
+        res.status(400).json({ error: "Password must be at least 4 characters" });
+        return;
+      }
+      const hashedPassword = await hashPassword(password);
+      await pool.query(
+        `UPDATE users SET display_name = $1, first_name = $2, last_name = $3,
+                          username = $4, password_hash = $5, current_level = $6
+         WHERE id = $7`,
+        [displayName, firstName.trim(), lastName.trim(),
+         username.trim(), hashedPassword, level, studentId],
+      );
+    } else {
+      await pool.query(
+        `UPDATE users SET display_name = $1, first_name = $2, last_name = $3,
+                          username = $4, current_level = $5
+         WHERE id = $6`,
+        [displayName, firstName.trim(), lastName.trim(),
+         username.trim(), level, studentId],
+      );
+    }
+
+    res.json({ id: studentId, displayName, firstName: firstName.trim(),
+               lastName: lastName.trim(), username: username.trim(),
+               currentLevel: level });
+  } catch (err) {
+    console.error("PUT /api/teacher/students/:studentId error:", err);
+    res.status(500).json({ error: "Failed to update student" });
+  }
+});
+
+// PUT /api/teacher/students/:studentId/deactivate
+teacherRouter.put("/students/:studentId/deactivate", async (req, res) => {
+  try {
+    const studentId = parseInt(req.params.studentId, 10);
+    const familyId = req.auth!.familyId;
+
+    const result = await pool.query(
+      "UPDATE users SET active = false WHERE id = $1 AND family_id = $2 AND role = 'child' RETURNING id",
+      [studentId, familyId],
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: "Student not found" });
+      return;
+    }
+    res.json({ id: studentId, active: false });
+  } catch (err) {
+    console.error("PUT /api/teacher/students/:studentId/deactivate error:", err);
+    res.status(500).json({ error: "Failed to deactivate student" });
+  }
+});
+
+// PUT /api/teacher/students/:studentId/activate
+teacherRouter.put("/students/:studentId/activate", async (req, res) => {
+  try {
+    const studentId = parseInt(req.params.studentId, 10);
+    const familyId = req.auth!.familyId;
+
+    const result = await pool.query(
+      "UPDATE users SET active = true WHERE id = $1 AND family_id = $2 AND role = 'child' RETURNING id",
+      [studentId, familyId],
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: "Student not found" });
+      return;
+    }
+    res.json({ id: studentId, active: true });
+  } catch (err) {
+    console.error("PUT /api/teacher/students/:studentId/activate error:", err);
+    res.status(500).json({ error: "Failed to activate student" });
+  }
+});
+
+// DELETE /api/teacher/students/:studentId
+teacherRouter.delete("/students/:studentId", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const studentId = parseInt(req.params.studentId, 10);
+    const familyId = req.auth!.familyId;
+
+    // Verify student belongs to this family
+    const check = await client.query(
+      "SELECT id FROM users WHERE id = $1 AND family_id = $2 AND role = 'child'",
+      [studentId, familyId],
+    );
+    if (check.rows.length === 0) {
+      res.status(404).json({ error: "Student not found" });
+      return;
+    }
+
+    await client.query("BEGIN");
+
+    // Delete in dependency order
+    await client.query("DELETE FROM excluded_words WHERE child_id = $1", [studentId]);
+    await client.query("DELETE FROM assigned_tests WHERE child_id = $1", [studentId]);
+    await client.query("DELETE FROM user_badges WHERE user_id = $1", [studentId]);
+    await client.query("DELETE FROM word_introductions WHERE user_id = $1", [studentId]);
+    await client.query("DELETE FROM word_mastery WHERE user_id = $1", [studentId]);
+    await client.query("DELETE FROM attempts WHERE user_id = $1", [studentId]);
+    await client.query("DELETE FROM sessions WHERE user_id = $1", [studentId]);
+    await client.query("DELETE FROM user_stats WHERE user_id = $1", [studentId]);
+    await client.query("DELETE FROM users WHERE id = $1", [studentId]);
+
+    await client.query("COMMIT");
+    res.json({ deleted: true });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("DELETE /api/teacher/students/:studentId error:", err);
+    res.status(500).json({ error: "Failed to delete student" });
+  } finally {
+    client.release();
   }
 });

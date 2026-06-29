@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
-  fetchProfiles,
   loginParent,
   loginChild,
   setToken,
   setCurrentUserId,
   type AuthUser,
-  type ChildProfile,
 } from "./api";
 
 interface LoginProps {
@@ -14,56 +12,38 @@ interface LoginProps {
 }
 
 export function Login({ onLogin }: LoginProps) {
-  const [mode, setMode] = useState<"profiles" | "pin" | "parent">("profiles");
-  const [profiles, setProfiles] = useState<ChildProfile[]>([]);
-  const [selectedProfile, setSelectedProfile] = useState<ChildProfile | null>(null);
-  const [pin, setPin] = useState("");
-  const [email, setEmail] = useState("");
+  const [mode, setMode] = useState<"student" | "parent">("student");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
+  const [parentPassword, setParentPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchProfiles()
-      .then((p) => {
-        setProfiles(p);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
-  const handleChildSelect = useCallback((profile: ChildProfile) => {
-    setSelectedProfile(profile);
-    setPin("");
-    setError("");
-    setMode("pin");
-  }, []);
-
-  const handlePinSubmit = useCallback(async () => {
-    if (!selectedProfile || !pin.trim()) return;
+  const handleStudentSubmit = useCallback(async () => {
+    if (!username.trim() || !password) return;
     setError("");
     try {
-      const result = await loginChild(selectedProfile.id, pin.trim());
-      setToken(result.token);
-      setCurrentUserId(result.user.id);
-      onLogin(result.user);
-    } catch (err: any) {
-      setError(err.message || "Wrong PIN");
-    }
-  }, [selectedProfile, pin, onLogin]);
-
-  const handleParentSubmit = useCallback(async () => {
-    if (!email.trim() || !password) return;
-    setError("");
-    try {
-      const result = await loginParent(email.trim(), password);
+      const result = await loginChild(username.trim(), password);
       setToken(result.token);
       setCurrentUserId(result.user.id);
       onLogin(result.user);
     } catch (err: any) {
       setError(err.message || "Login failed");
     }
-  }, [email, password, onLogin]);
+  }, [username, password, onLogin]);
+
+  const handleParentSubmit = useCallback(async () => {
+    if (!email.trim() || !parentPassword) return;
+    setError("");
+    try {
+      const result = await loginParent(email.trim(), parentPassword);
+      setToken(result.token);
+      setCurrentUserId(result.user.id);
+      onLogin(result.user);
+    } catch (err: any) {
+      setError(err.message || "Login failed");
+    }
+  }, [email, parentPassword, onLogin]);
 
   const header = (
     <header className="header">
@@ -71,15 +51,6 @@ export function Login({ onLogin }: LoginProps) {
       <h1 className="title">Spelling</h1>
     </header>
   );
-
-  if (loading) {
-    return (
-      <div className="app">
-        {header}
-        <p className="loading">Loading...</p>
-      </div>
-    );
-  }
 
   // ── Parent login ──
   if (mode === "parent") {
@@ -103,8 +74,8 @@ export function Login({ onLogin }: LoginProps) {
             className="login-input"
             type="password"
             placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            value={parentPassword}
+            onChange={(e) => setParentPassword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleParentSubmit()}
             autoComplete="current-password"
           />
@@ -112,7 +83,7 @@ export function Login({ onLogin }: LoginProps) {
           <button
             className="btn btn-check"
             onClick={handleParentSubmit}
-            disabled={!email.trim() || !password}
+            disabled={!email.trim() || !parentPassword}
             type="button"
           >
             Sign in
@@ -120,87 +91,53 @@ export function Login({ onLogin }: LoginProps) {
 
           <button
             className="btn-link"
-            onClick={() => { setMode("profiles"); setError(""); }}
+            onClick={() => { setMode("student"); setError(""); }}
             type="button"
           >
-            Back to profiles
+            Student login
           </button>
         </main>
       </div>
     );
   }
 
-  // ── PIN entry ──
-  if (mode === "pin" && selectedProfile) {
-    return (
-      <div className="app">
-        {header}
-        <main className="card">
-          <p className="mode-heading">Hi, {selectedProfile.displayName}!</p>
-          <p className="login-sub">Enter your PIN</p>
-          {error && <p className="login-error">{error}</p>}
-
-          <input
-            className="pin-input"
-            type="password"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={6}
-            placeholder="----"
-            value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-            onKeyDown={(e) => e.key === "Enter" && handlePinSubmit()}
-            autoComplete="off"
-            autoFocus
-          />
-
-          <button
-            className="btn btn-check"
-            onClick={handlePinSubmit}
-            disabled={pin.length < 4}
-            type="button"
-          >
-            Go
-          </button>
-
-          <button
-            className="btn-link"
-            onClick={() => { setMode("profiles"); setError(""); }}
-            type="button"
-          >
-            Pick a different profile
-          </button>
-        </main>
-      </div>
-    );
-  }
-
-  // ── Profile picker ──
+  // ── Student login ──
   return (
     <div className="app">
       {header}
       <main className="card">
-        <p className="mode-heading">Who's practicing?</p>
+        <p className="mode-heading">Student Login</p>
+        {error && <p className="login-error">{error}</p>}
 
-        <div className="profiles-grid">
-          {profiles.map((p) => (
-            <button
-              key={p.id}
-              className="profile-card"
-              onClick={() => handleChildSelect(p)}
-              type="button"
-            >
-              <span className="profile-avatar">
-                {p.displayName.charAt(0).toUpperCase()}
-              </span>
-              <span className="profile-name">{p.displayName}</span>
-            </button>
-          ))}
-        </div>
+        <input
+          className="login-input"
+          type="text"
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleStudentSubmit()}
+          autoComplete="username"
+          autoCapitalize="off"
+          autoCorrect="off"
+        />
+        <input
+          className="login-input"
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleStudentSubmit()}
+          autoComplete="current-password"
+        />
 
-        {profiles.length === 0 && (
-          <p className="login-sub">No profiles yet. Ask a parent to set things up.</p>
-        )}
+        <button
+          className="btn btn-check"
+          onClick={handleStudentSubmit}
+          disabled={!username.trim() || !password}
+          type="button"
+        >
+          Sign in
+        </button>
       </main>
 
       <button

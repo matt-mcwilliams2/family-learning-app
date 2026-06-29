@@ -105,6 +105,10 @@ export interface ChildSummary {
   lastActive: string | null;
   placementTaken: boolean;
   placementLevel: number | null;
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  active?: boolean;
 }
 
 export interface AssignedTest {
@@ -228,17 +232,17 @@ export async function loginParent(
 }
 
 export async function loginChild(
-  userId: number,
-  pin: string,
+  username: string,
+  password: string,
 ): Promise<{ token: string; user: AuthUser }> {
   const res = await fetch("/api/auth/child-login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId, pin }),
+    body: JSON.stringify({ username, password }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Login failed" }));
-    throw new Error(err.error || "Invalid PIN");
+    throw new Error(err.error || "Invalid username or password");
   }
   return res.json();
 }
@@ -540,5 +544,75 @@ export async function setPronunciationOverride(
     body: JSON.stringify({ pronunciationOverride }),
   });
   if (!res.ok) throw new Error("Failed to update pronunciation");
+  return res.json();
+}
+
+// ── Student management ─────────────────────────────────────────
+
+export async function createStudent(data: {
+  firstName: string;
+  lastName: string;
+  gradeLevel: number;
+  username: string;
+  password: string;
+}): Promise<any> {
+  const res = await fetch("/api/teacher/students", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to create student" }));
+    throw new Error(err.error || "Failed to create student");
+  }
+  return res.json();
+}
+
+export async function updateStudent(
+  studentId: number,
+  data: {
+    firstName: string;
+    lastName: string;
+    gradeLevel: number;
+    username: string;
+    password?: string;
+  },
+): Promise<any> {
+  const res = await fetch(`/api/teacher/students/${studentId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to update student" }));
+    throw new Error(err.error || "Failed to update student");
+  }
+  return res.json();
+}
+
+export async function deactivateStudent(studentId: number): Promise<any> {
+  const res = await fetch(`/api/teacher/students/${studentId}/deactivate`, {
+    method: "PUT",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to deactivate student");
+  return res.json();
+}
+
+export async function activateStudent(studentId: number): Promise<any> {
+  const res = await fetch(`/api/teacher/students/${studentId}/activate`, {
+    method: "PUT",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to activate student");
+  return res.json();
+}
+
+export async function deleteStudent(studentId: number): Promise<any> {
+  const res = await fetch(`/api/teacher/students/${studentId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to delete student");
   return res.json();
 }
