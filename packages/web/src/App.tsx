@@ -1065,17 +1065,7 @@ export function App({ onLogout }: AppProps) {
               )}
 
               {phase === "answered" && (
-                <div
-                  className={`result ${correct ? "result-correct" : "result-wrong"}`}
-                >
-                  <p className="result-text">
-                    {correct ? "Correct!" : "Not quite."}
-                  </p>
-                  {!correct && (
-                    <p className="result-answer">
-                      The answer is: <strong>{currentWord.word}</strong>
-                    </p>
-                  )}
+                <div className="result">
                   <button
                     className="btn btn-next"
                     onClick={nextPlacementWord}

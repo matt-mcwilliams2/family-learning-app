@@ -476,7 +476,7 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
                         value={placementGrade}
                         onChange={(e) => setPlacementGrade(parseInt(e.target.value, 10))}
                       >
-                        {[4, 5, 6, 7, 8, 9].map((g) => (
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
                           <option key={g} value={g}>
                             {g}
                           </option>
@@ -560,7 +560,7 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
                     onChange={(e) => setAddWordGrade(parseInt(e.target.value, 10))}
                     disabled={addWordLoading}
                   >
-                    {[4, 5, 6, 7, 8, 9].map((g) => (
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((g) => (
                       <option key={g} value={g}>
                         Gr {g}
                       </option>

@@ -4,16 +4,16 @@ import pool from "../db.js";
 export const placementRouter = Router();
 
 /**
- * Grade distribution for the 40-word placement quiz.
+ * Grade distribution for the 20-word placement quiz.
  * Spans grades 4-9 to find where the student starts missing words.
  */
 const PLACEMENT_DISTRIBUTION: Array<{ grade: number; count: number }> = [
-  { grade: 4, count: 6 },
-  { grade: 5, count: 7 },
-  { grade: 6, count: 8 },
-  { grade: 7, count: 7 },
-  { grade: 8, count: 6 },
-  { grade: 9, count: 6 },
+  { grade: 4, count: 3 },
+  { grade: 5, count: 3 },
+  { grade: 6, count: 4 },
+  { grade: 7, count: 4 },
+  { grade: 8, count: 3 },
+  { grade: 9, count: 3 },
 ];
 
 // GET /api/placement/:userId/status
@@ -42,7 +42,7 @@ placementRouter.get("/:userId/status", async (req, res) => {
 });
 
 // GET /api/placement/:userId/quiz
-// Generate a 40-word placement quiz. Returns words in grade order (easiest first).
+// Generate a 20-word placement quiz. Returns words in grade order (easiest first).
 placementRouter.get("/:userId/quiz", async (req, res) => {
   try {
     const userId = parseInt(req.params.userId, 10);
