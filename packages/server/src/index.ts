@@ -4,6 +4,9 @@ import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
 import pool from "./db.js";
+import { requireAuth } from "./auth.js";
+import { authRouter } from "./routes/auth.js";
+import { teacherRouter } from "./routes/teacher.js";
 import { wordsRouter } from "./routes/words.js";
 import { attemptsRouter } from "./routes/attempts.js";
 import { statsRouter } from "./routes/stats.js";
@@ -12,6 +15,7 @@ import { schedulerRouter } from "./routes/scheduler.js";
 import { sessionsRouter } from "./routes/sessions.js";
 import { placementRouter } from "./routes/placement.js";
 import { badgesRouter } from "./routes/badges.js";
+import { assignedTestsRouter } from "./routes/assigned-tests.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -32,14 +36,22 @@ app.get("/api/health", async (_req, res) => {
   }
 });
 
-app.use("/api/words", wordsRouter);
-app.use("/api/attempts", attemptsRouter);
-app.use("/api/stats", statsRouter);
-app.use("/api/mastery", masteryRouter);
-app.use("/api/scheduler", schedulerRouter);
-app.use("/api/sessions", sessionsRouter);
-app.use("/api/placement", placementRouter);
-app.use("/api/badges", badgesRouter);
+// Auth routes (no auth required on these)
+app.use("/api/auth", authRouter);
+
+// Teacher dashboard (parent-only, auth handled inside router)
+app.use("/api/teacher", teacherRouter);
+
+// All child-facing API routes require auth
+app.use("/api/words", requireAuth, wordsRouter);
+app.use("/api/attempts", requireAuth, attemptsRouter);
+app.use("/api/stats", requireAuth, statsRouter);
+app.use("/api/mastery", requireAuth, masteryRouter);
+app.use("/api/scheduler", requireAuth, schedulerRouter);
+app.use("/api/sessions", requireAuth, sessionsRouter);
+app.use("/api/placement", requireAuth, placementRouter);
+app.use("/api/badges", requireAuth, badgesRouter);
+app.use("/api/assigned-tests", requireAuth, assignedTestsRouter);
 
 // ---- Static files (built frontend) ----
 // Serve the Vite build from packages/web/dist whenever it exists.

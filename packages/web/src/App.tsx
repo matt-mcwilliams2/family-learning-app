@@ -9,11 +9,14 @@ import {
   fetchBadges,
   postAttempt,
   postSession,
+  fetchPendingTest,
+  completeAssignedTest,
   type WordFromApi,
   type Stats,
   type Badge,
   type PlacementScoreResult,
   type SessionResult,
+  type PendingTest,
 } from "./api";
 import { PickSpelling } from "./PickSpelling";
 import { MatchExercise } from "./MatchExercise";
@@ -56,7 +59,11 @@ const LIVES_TEST = 3;
 const RECOVERY_LIVES = 2;
 const TEST_MAX_REPLAYS = 1;
 
-export function App() {
+interface AppProps {
+  onLogout: () => void;
+}
+
+export function App({ onLogout }: AppProps) {
   // ── Screen state ──
   const [screen, setScreen] = useState<Screen>("loading");
   const [stats, setStats] = useState<Stats>({
@@ -71,6 +78,10 @@ export function App() {
   const [placementWords, setPlacementWords] = useState<WordFromApi[]>([]);
   const [placementResults, setPlacementResults] =
     useState<PlacementScoreResult | null>(null);
+
+  // ── Assigned test ──
+  const [pendingTest, setPendingTest] = useState<PendingTest | null>(null);
+  const [currentAssignedTestId, setCurrentAssignedTestId] = useState<number | null>(null);
 
   // ── Session ──
   const [sessionMode, setSessionMode] = useState<SessionMode>("practice");
@@ -139,6 +150,13 @@ export function App() {
           setPhase("ready");
           setScreen("placement");
         } else {
+          // Check for assigned test
+          try {
+            const pt = await fetchPendingTest();
+            setPendingTest(pt);
+          } catch {
+            // Ignore — no pending test
+          }
           setScreen("home");
         }
       } catch (err) {
@@ -184,9 +202,10 @@ export function App() {
   }, [currentWord, screen, sessionMode, testReplaysUsed, phase]);
 
   // ── Start a session ──
-  const startSession = useCallback(async (mode: SessionMode) => {
+  const startSession = useCallback(async (mode: SessionMode, wordLimit?: number, assignedTestId?: number) => {
     try {
-      const data = await fetchSessionWords(mode, 10);
+      const data = await fetchSessionWords(mode, wordLimit ?? 10);
+      setCurrentAssignedTestId(assignedTestId ?? null);
       setSessionMode(mode);
       setSessionWords(data.words);
       setCurrentLevel(data.currentLevel);
@@ -468,12 +487,23 @@ export function App() {
         if (result.newBadges && result.newBadges.length > 0) {
           flashBadge(result.newBadges[0]);
         }
+
+        // If this was an assigned test, mark it complete
+        if (currentAssignedTestId && result.sessionId) {
+          try {
+            await completeAssignedTest(currentAssignedTestId, result.sessionId);
+            setPendingTest(null);
+            setCurrentAssignedTestId(null);
+          } catch (err) {
+            console.error("Failed to complete assigned test:", err);
+          }
+        }
       }
     } catch (err) {
       console.error("Failed to record session:", err);
     }
     setScreen("session-results");
-  }, [wordResults, sessionMode, flashBadge]);
+  }, [wordResults, sessionMode, flashBadge, currentAssignedTestId]);
 
   // ── Next word (hear_and_spell) ──
   const nextWord = useCallback(async () => {
@@ -764,6 +794,22 @@ export function App() {
           </div>
         </div>
 
+        {/* Assigned test banner */}
+        {pendingTest && (
+          <div className="assigned-test-banner">
+            <p className="assigned-test-banner-text">
+              Your teacher assigned a test!
+            </p>
+            <button
+              className="btn btn-test"
+              onClick={() => startSession("test", pendingTest.wordCount, pendingTest.id)}
+              type="button"
+            >
+              Take the test ({pendingTest.wordCount} words)
+            </button>
+          </div>
+        )}
+
         <main className="card">
           <p className="mode-heading">Choose a mode</p>
 
@@ -814,6 +860,10 @@ export function App() {
             </div>
           </div>
         )}
+
+        <button className="btn-link teacher-link" onClick={onLogout} type="button">
+          Switch profile
+        </button>
       </div>
     );
   }
@@ -1243,8 +1293,8 @@ export function App() {
           <button
             className="btn btn-check"
             onClick={() => {
-              Promise.all([fetchStats(), fetchBadges()])
-                .then(([s, b]) => { setStats(s); setBadges(b); })
+              Promise.all([fetchStats(), fetchBadges(), fetchPendingTest()])
+                .then(([s, b, pt]) => { setStats(s); setBadges(b); setPendingTest(pt); })
                 .catch(console.error);
               setScreen("home");
             }}

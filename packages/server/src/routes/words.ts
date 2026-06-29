@@ -56,18 +56,20 @@ wordsRouter.get("/session/:userId", async (req, res) => {
     const gradeLow = Math.floor(currentLevel);
     const gradeHigh = Math.ceil(currentLevel);
 
+    const familyId = req.auth!.familyId;
+
     let words: any[] = [];
 
     if (mode === "learn") {
       // Learn mode: words the student hasn't seen in 2+ exercise types yet.
       // Prefer words they've never attempted at all, then partially introduced.
-      words = await getLearnWords(userId, app, gradeLow, gradeHigh, limit);
+      words = await getLearnWords(userId, app, gradeLow, gradeHigh, limit, familyId);
     } else if (mode === "practice") {
       // Practice mode: mix of review-due words + fresh current-level words.
-      words = await getPracticeWords(userId, app, gradeLow, gradeHigh, limit);
+      words = await getPracticeWords(userId, app, gradeLow, gradeHigh, limit, familyId);
     } else if (mode === "test") {
       // Test mode: current-level words for a graded test.
-      words = await getTestWords(userId, app, gradeLow, gradeHigh, limit);
+      words = await getTestWords(userId, app, gradeLow, gradeHigh, limit, familyId);
     } else {
       res.status(400).json({ error: "Invalid mode. Use learn, practice, or test." });
       return;
@@ -91,6 +93,7 @@ async function getLearnWords(
   gradeLow: number,
   gradeHigh: number,
   limit: number,
+  familyId: number,
 ): Promise<any[]> {
   // Words not yet introduced (seen in < 2 exercise types).
   // First, words with no attempts at all, then partially introduced.
@@ -105,14 +108,18 @@ async function getLearnWords(
        ON wi.word_id = w.id AND wi.user_id = $1 AND wi.app = $2
      LEFT JOIN word_mastery wm
        ON wm.word_id = w.id AND wm.user_id = $1 AND wm.app = $2
+     LEFT JOIN excluded_words ew
+       ON ew.word_id = w.id AND ew.child_id = $1
      WHERE w.app = $2
        AND w.grade >= $3 AND w.grade <= $4
+       AND (w.family_id IS NULL OR w.family_id = $6)
+       AND ew.word_id IS NULL
        AND COALESCE(wi.introduced, false) = false
      ORDER BY
        COALESCE(array_length(wi.exercise_types, 1), 0) ASC,
        RANDOM()
      LIMIT $5`,
-    [userId, app, gradeLow, gradeHigh, limit],
+    [userId, app, gradeLow, gradeHigh, limit, familyId],
   );
   return formatWords(result.rows);
 }
@@ -123,10 +130,11 @@ async function getPracticeWords(
   gradeLow: number,
   gradeHigh: number,
   limit: number,
+  familyId: number,
 ): Promise<any[]> {
   const now = new Date();
 
-  // First half: review-due words (from mastery scheduler)
+  // First half: review-due words (from mastery scheduler), excluding removed words
   const reviewLimit = Math.ceil(limit * 0.6);
   const reviewResult = await pool.query(
     `SELECT w.id, w.word, w.grade, w.definition, w.example, w.syllables,
@@ -134,11 +142,14 @@ async function getPracticeWords(
             COALESCE(wm.mastery_score, 0) AS mastery_score, wm.has_ever_missed
      FROM word_mastery wm
      JOIN words w ON w.id = wm.word_id
+     LEFT JOIN excluded_words ew ON ew.word_id = w.id AND ew.child_id = $1
      WHERE wm.user_id = $1 AND wm.app = $2
        AND wm.next_review_at <= $3
+       AND (w.family_id IS NULL OR w.family_id = $5)
+       AND ew.word_id IS NULL
      ORDER BY wm.mastery_score ASC, wm.next_review_at ASC
      LIMIT $4`,
-    [userId, app, now, reviewLimit],
+    [userId, app, now, reviewLimit, familyId],
   );
 
   const reviewWords = formatWords(reviewResult.rows);
@@ -159,12 +170,16 @@ async function getPracticeWords(
          ON wi.word_id = w.id AND wi.user_id = $1 AND wi.app = $2
        LEFT JOIN word_mastery wm
          ON wm.word_id = w.id AND wm.user_id = $1 AND wm.app = $2
+       LEFT JOIN excluded_words ew
+         ON ew.word_id = w.id AND ew.child_id = $1
        WHERE w.app = $2
          AND w.grade >= $3 AND w.grade <= $4
+         AND (w.family_id IS NULL OR w.family_id = $6)
+         AND ew.word_id IS NULL
          AND COALESCE(wi.introduced, false) = true
        ORDER BY RANDOM()
        LIMIT $5`,
-      [userId, app, gradeLow, gradeHigh, fillLimit + 10],
+      [userId, app, gradeLow, gradeHigh, fillLimit + 10, familyId],
     );
 
     fillWords = formatWords(fillResult.rows).filter(
@@ -184,10 +199,14 @@ async function getPracticeWords(
        FROM words w
        LEFT JOIN word_mastery wm
          ON wm.word_id = w.id AND wm.user_id = $1 AND wm.app = $2
+       LEFT JOIN excluded_words ew
+         ON ew.word_id = w.id AND ew.child_id = $1
        WHERE w.app = $2 AND w.grade >= $3 AND w.grade <= $4
+         AND (w.family_id IS NULL OR w.family_id = $6)
+         AND ew.word_id IS NULL
        ORDER BY RANDOM()
        LIMIT $5`,
-      [userId, app, gradeLow, gradeHigh, extraLimit + 10],
+      [userId, app, gradeLow, gradeHigh, extraLimit + 10, familyId],
     );
     const extras = formatWords(extraResult.rows).filter(
       (w: any) => !existingIds.has(w.id),
@@ -204,6 +223,7 @@ async function getTestWords(
   gradeLow: number,
   gradeHigh: number,
   limit: number,
+  familyId: number,
 ): Promise<any[]> {
   // Test mode: pull introduced words at the current level.
   // Prefer words the student has practiced but not yet tested.
@@ -216,12 +236,16 @@ async function getTestWords(
        ON wi.word_id = w.id AND wi.user_id = $1 AND wi.app = $2
      LEFT JOIN word_mastery wm
        ON wm.word_id = w.id AND wm.user_id = $1 AND wm.app = $2
+     LEFT JOIN excluded_words ew
+       ON ew.word_id = w.id AND ew.child_id = $1
      WHERE w.app = $2
        AND w.grade >= $3 AND w.grade <= $4
+       AND (w.family_id IS NULL OR w.family_id = $6)
+       AND ew.word_id IS NULL
        AND COALESCE(wi.introduced, false) = true
      ORDER BY RANDOM()
      LIMIT $5`,
-    [userId, app, gradeLow, gradeHigh, limit],
+    [userId, app, gradeLow, gradeHigh, limit, familyId],
   );
 
   // If not enough introduced words, fill with any at the right grade
@@ -235,10 +259,14 @@ async function getTestWords(
        FROM words w
        LEFT JOIN word_mastery wm
          ON wm.word_id = w.id AND wm.user_id = $1 AND wm.app = $2
+       LEFT JOIN excluded_words ew
+         ON ew.word_id = w.id AND ew.child_id = $1
        WHERE w.app = $2 AND w.grade >= $3 AND w.grade <= $4
+         AND (w.family_id IS NULL OR w.family_id = $6)
+         AND ew.word_id IS NULL
        ORDER BY RANDOM()
        LIMIT $5`,
-      [userId, app, gradeLow, gradeHigh, limit],
+      [userId, app, gradeLow, gradeHigh, limit, familyId],
     );
     for (const row of fillResult.rows) {
       if (!existingIds.has(row.id) && words.length < limit) {

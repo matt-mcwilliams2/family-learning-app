@@ -148,11 +148,44 @@ CREATE TABLE IF NOT EXISTS user_badges (
 );
 `;
 
+const UP_005 = `
+-- Per-child weekly new-word count, set by parent.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_new_words INTEGER NOT NULL DEFAULT 10;
+`;
+
+const UP_006 = `
+-- Excluded words per child (parent removes from rotation)
+CREATE TABLE IF NOT EXISTS excluded_words (
+  child_id    INTEGER NOT NULL REFERENCES users(id),
+  word_id     INTEGER NOT NULL REFERENCES words(id),
+  excluded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (child_id, word_id)
+);
+
+-- Teacher-assigned tests
+CREATE TABLE IF NOT EXISTS assigned_tests (
+  id           SERIAL PRIMARY KEY,
+  child_id     INTEGER NOT NULL REFERENCES users(id),
+  family_id    INTEGER NOT NULL REFERENCES families(id),
+  assigned_by  INTEGER NOT NULL REFERENCES users(id),
+  word_count   INTEGER NOT NULL DEFAULT 10,
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed')),
+  session_id   INTEGER REFERENCES sessions(id),
+  assigned_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_assigned_tests_child
+  ON assigned_tests(child_id, status);
+`;
+
 const MIGRATIONS: Migration[] = [
   { name: "001_initial_schema", sql: UP },
   { name: "002_mastery_and_sessions", sql: UP_002 },
   { name: "003_placement_and_introductions", sql: UP_003 },
   { name: "004_badges", sql: UP_004 },
+  { name: "005_weekly_new_words", sql: UP_005 },
+  { name: "006_excluded_words_and_assigned_tests", sql: UP_006 },
 ];
 
 async function migrate() {
