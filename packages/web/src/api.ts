@@ -516,6 +516,20 @@ export async function excuseAttempt(
 
 // ── Teacher: Pronunciation override ───────────────────────────
 
+// ── Child: Past mistakes (for proofreading) ─────────────────
+
+export async function fetchPastMistakes(
+  wordIds: number[],
+): Promise<Record<number, string[]>> {
+  if (wordIds.length === 0) return {};
+  const res = await fetch(
+    `/api/words/past-mistakes/${getUserId()}?wordIds=${wordIds.join(",")}`,
+    { headers: authHeaders() },
+  );
+  if (!res.ok) throw new Error("Failed to load past mistakes");
+  return res.json();
+}
+
 export async function setPronunciationOverride(
   wordId: number,
   pronunciationOverride: string,

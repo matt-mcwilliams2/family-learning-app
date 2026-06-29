@@ -1705,3 +1705,114 @@
   font-size: 16px;
   color: #666;
 }
+
+/* ---- Proofreading ---- */
+
+.proofread-exercise {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.proofread-sentence {
+  font-size: 18px;
+  line-height: 1.8;
+  text-align: center;
+  padding: 16px;
+  background: var(--color-bg);
+  border-radius: 12px;
+}
+
+.proofread-word {
+  display: inline;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.proofread-word:active {
+  opacity: 0.7;
+}
+
+.proofread-word-wrong {
+  background: #ffeaea;
+  color: var(--color-third);
+  text-decoration: underline wavy var(--color-third);
+}
+
+.proofread-word-shake {
+  display: inline-block;
+  animation: match-shake 0.4s ease-out;
+}
+
+.proofread-word-found {
+  background: #fff3cd;
+  font-weight: 700;
+}
+
+.proofread-fix-label {
+  font-size: 14px;
+  color: #666;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* ---- Syllable spell ---- */
+
+.syllable-exercise {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.syllable-display {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.syllable-chunk {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  min-width: 40px;
+  text-align: center;
+}
+
+.syllable-done {
+  background: #e8f5e9;
+  color: var(--color-correct);
+}
+
+.syllable-active {
+  background: #e3f2fd;
+  border: 2px solid var(--color-secondary);
+}
+
+.syllable-pending {
+  background: #f0f0f0;
+  color: #ccc;
+}
+
+.syllable-wrong {
+  background: #ffeaea;
+  color: var(--color-third);
+}
+
+.syllable-input {
+  width: 140px;
+  margin: 0 auto;
+}
+
+/* ---- Lock it in ---- */
+
+.lock-label {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-accent);
+  text-align: center;
+}

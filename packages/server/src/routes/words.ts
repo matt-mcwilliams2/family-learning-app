@@ -278,6 +278,48 @@ async function getTestWords(
   return words;
 }
 
+// GET /api/words/past-mistakes/:userId?wordIds=1,2,3
+// Returns past incorrect answers for given words, grouped by word ID.
+// Used by the proofreading exercise to generate realistic misspellings.
+wordsRouter.get("/past-mistakes/:userId", async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    const wordIdsParam = (req.query.wordIds as string) ?? "";
+    const wordIds = wordIdsParam
+      .split(",")
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => !isNaN(n));
+
+    if (wordIds.length === 0) {
+      res.json({});
+      return;
+    }
+
+    const result = await pool.query(
+      `SELECT DISTINCT a.word_id, a.answer_given
+       FROM attempts a
+       JOIN words w ON w.id = a.word_id
+       WHERE a.user_id = $1
+         AND a.correct = false
+         AND a.word_id = ANY($2::int[])
+         AND lower(a.answer_given) != lower(w.word)
+       ORDER BY a.word_id`,
+      [userId, wordIds],
+    );
+
+    const map: Record<number, string[]> = {};
+    for (const row of result.rows) {
+      if (!map[row.word_id]) map[row.word_id] = [];
+      map[row.word_id].push(row.answer_given);
+    }
+
+    res.json(map);
+  } catch (err) {
+    console.error("GET /api/words/past-mistakes error:", err);
+    res.status(500).json({ error: "Failed to load past mistakes" });
+  }
+});
+
 function formatWord(row: any) {
   return {
     id: row.id,

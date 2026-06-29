@@ -11,6 +11,7 @@ import {
   postSession,
   fetchPendingTest,
   completeAssignedTest,
+  fetchPastMistakes,
   type WordFromApi,
   type Stats,
   type Badge,
@@ -24,6 +25,8 @@ import { MissingLetters } from "./MissingLetters";
 import { LetterTray } from "./LetterTray";
 import { WordJumble } from "./WordJumble";
 import { SentenceFill } from "./SentenceFill";
+import { Proofreading } from "./Proofreading";
+import { SyllableSpell } from "./SyllableSpell";
 import "./App.css";
 
 // ────────────────────────────────────────────────
@@ -46,8 +49,10 @@ type SessionStage =
   | "pick_spelling"
   | "missing_letters"
   | "letter_tray"
+  | "syllable_spell"
   | "word_jumble"
   | "sentence_fill"
+  | "proofreading"
   | "hear_and_spell"
   | "out_of_lives";
 
@@ -131,6 +136,19 @@ export function App({ onLogout }: AppProps) {
   // Sentence fill stage index
   const [sentenceFillIndex, setSentenceFillIndex] = useState(0);
 
+  // Syllable spell stage index
+  const [syllableSpellIndex, setSyllableSpellIndex] = useState(0);
+
+  // Proofreading stage index
+  const [proofreadingIndex, setProofreadingIndex] = useState(0);
+
+  // Past mistakes map for proofreading
+  const [pastMistakesMap, setPastMistakesMap] = useState<Record<number, string[]>>({});
+
+  // Lock it in
+  const [lockItInActive, setLockItInActive] = useState(false);
+  const [lockItInWordId, setLockItInWordId] = useState<number | null>(null);
+
   // Speed round state
   const [speedTimer, setSpeedTimer] = useState(60);
   const [speedWords, setSpeedWords] = useState<WordFromApi[]>([]);
@@ -198,11 +216,15 @@ export function App({ onLogout }: AppProps) {
           ? sessionWords[missingLettersIndex] ?? null
           : sessionStage === "letter_tray"
             ? sessionWords[letterTrayIndex] ?? null
-            : sessionStage === "word_jumble"
-              ? sessionWords[wordJumbleIndex] ?? null
-              : sessionStage === "sentence_fill"
-                ? sessionWords[sentenceFillIndex] ?? null
-                : sessionWords[wordIndex] ?? null;
+            : sessionStage === "syllable_spell"
+              ? sessionWords[syllableSpellIndex] ?? null
+              : sessionStage === "word_jumble"
+                ? sessionWords[wordJumbleIndex] ?? null
+                : sessionStage === "sentence_fill"
+                  ? sessionWords[sentenceFillIndex] ?? null
+                  : sessionStage === "proofreading"
+                    ? sessionWords[proofreadingIndex] ?? null
+                    : sessionWords[wordIndex] ?? null;
 
   // Focus input when word changes (hear_and_spell / placement)
   useEffect(() => {
@@ -247,7 +269,20 @@ export function App({ onLogout }: AppProps) {
       setLetterTrayIndex(0);
       setWordJumbleIndex(0);
       setSentenceFillIndex(0);
+      setSyllableSpellIndex(0);
+      setProofreadingIndex(0);
+      setLockItInActive(false);
+      setLockItInWordId(null);
       setSessionResult(null);
+
+      // Fetch past mistakes for proofreading (practice mode)
+      if (mode === "practice" && data.words.length > 0) {
+        fetchPastMistakes(data.words.map((w) => w.id))
+          .then(setPastMistakesMap)
+          .catch(() => setPastMistakesMap({}));
+      } else {
+        setPastMistakesMap({});
+      }
 
       // Set lives and initial stage based on mode
       if (mode === "learn") {
@@ -387,11 +422,9 @@ export function App({ onLogout }: AppProps) {
       if (nextIdx < sessionWords.length) {
         setLetterTrayIndex(nextIdx);
       } else {
-        // All letter-tray done, move to hear_and_spell
-        setSessionStage("hear_and_spell");
-        setWordIndex(0);
-        setInput("");
-        setPhase("ready");
+        // All letter-tray done, move to syllable_spell
+        setSessionStage("syllable_spell");
+        setSyllableSpellIndex(0);
       }
     },
     [letterTrayIndex, sessionWords, flashBadge],
@@ -459,14 +492,86 @@ export function App({ onLogout }: AppProps) {
       if (nextIdx < sessionWords.length) {
         setSentenceFillIndex(nextIdx);
       } else {
-        // All sentence-fill done, move to hear_and_spell
+        // All sentence-fill done, move to proofreading
+        setSessionStage("proofreading");
+        setProofreadingIndex(0);
+      }
+    },
+    [sentenceFillIndex, sessionWords, sessionMode, flashBadge],
+  );
+
+  // ── Syllable spell complete for one word ──
+  const handleSyllableSpellComplete = useCallback(
+    async (isCorrect: boolean, answerGiven: string) => {
+      const ssWord = sessionWords[syllableSpellIndex];
+      if (!ssWord) return;
+
+      try {
+        const result = await postAttempt({
+          wordId: ssWord.id,
+          correct: isCorrect,
+          answerGiven,
+          exerciseType: "syllable_spell",
+          mode: "learn",
+        });
+        const newStats = await fetchStats();
+        setStats(newStats);
+        if (result.newBadges && result.newBadges.length > 0) {
+          flashBadge(result.newBadges[0]);
+        }
+      } catch (err) {
+        console.error("Failed to record syllable spell attempt:", err);
+      }
+
+      const nextIdx = syllableSpellIndex + 1;
+      if (nextIdx < sessionWords.length) {
+        setSyllableSpellIndex(nextIdx);
+      } else {
+        // All syllable-spell done, move to hear_and_spell
         setSessionStage("hear_and_spell");
         setWordIndex(0);
         setInput("");
         setPhase("ready");
       }
     },
-    [sentenceFillIndex, sessionWords, sessionMode, flashBadge],
+    [syllableSpellIndex, sessionWords, flashBadge],
+  );
+
+  // ── Proofreading complete for one word ──
+  const handleProofreadingComplete = useCallback(
+    async (isCorrect: boolean, answerGiven: string) => {
+      const prWord = sessionWords[proofreadingIndex];
+      if (!prWord) return;
+
+      try {
+        const result = await postAttempt({
+          wordId: prWord.id,
+          correct: isCorrect,
+          answerGiven,
+          exerciseType: "proofreading",
+          mode: sessionMode,
+        });
+        const newStats = await fetchStats();
+        setStats(newStats);
+        if (result.newBadges && result.newBadges.length > 0) {
+          flashBadge(result.newBadges[0]);
+        }
+      } catch (err) {
+        console.error("Failed to record proofreading attempt:", err);
+      }
+
+      const nextIdx = proofreadingIndex + 1;
+      if (nextIdx < sessionWords.length) {
+        setProofreadingIndex(nextIdx);
+      } else {
+        // All proofreading done, move to hear_and_spell
+        setSessionStage("hear_and_spell");
+        setWordIndex(0);
+        setInput("");
+        setPhase("ready");
+      }
+    },
+    [proofreadingIndex, sessionWords, sessionMode, flashBadge],
   );
 
   // ── Placement quiz ──
@@ -519,6 +624,32 @@ export function App({ onLogout }: AppProps) {
     setCorrect(isCorrect);
     setPhase("answered");
 
+    if (lockItInActive) {
+      // Lock-it-in mode: record attempt but no penalties, no queuing, no scoring
+      try {
+        const result = await postAttempt({
+          wordId: currentWord.id,
+          correct: isCorrect,
+          answerGiven: input.trim(),
+          exerciseType: "lock_it_in",
+          mode: sessionMode,
+        });
+        const newStats = await fetchStats();
+        setStats(newStats);
+        if (result.pointsAwarded > 0) {
+          setPointsFlash(result.pointsAwarded);
+          setTimeout(() => setPointsFlash(null), 1200);
+        }
+        if (result.newBadges && result.newBadges.length > 0) {
+          flashBadge(result.newBadges[0]);
+        }
+      } catch (err) {
+        console.error("Failed to record lock-it-in attempt:", err);
+      }
+      // Don't track in wordResults, don't deduct lives, don't queue
+      return;
+    }
+
     // Learn mode: queue missed for retest
     if (sessionMode === "learn" && !isCorrect && !inRetest) {
       setLearnRetestQueue((prev) => {
@@ -567,7 +698,7 @@ export function App({ onLogout }: AppProps) {
       ...prev,
       { word: currentWord, correct: isCorrect, answerGiven: input.trim() },
     ]);
-  }, [input, currentWord, sessionMode, inRetest]);
+  }, [input, currentWord, sessionMode, inRetest, lockItInActive]);
 
   // ── Finish session helper ──
   const finishSession = useCallback(async () => {
@@ -721,6 +852,25 @@ export function App({ onLogout }: AppProps) {
 
   // ── Next word (hear_and_spell) ──
   const nextWord = useCallback(async () => {
+    // If we just finished a lock-it-in rep, clear the flag and advance normally
+    if (lockItInActive) {
+      setLockItInActive(false);
+      setLockItInWordId(null);
+      // Fall through to normal advancement below
+    } else if (
+      // Trigger lock-it-in: correct hear_and_spell in learn/practice (not test, not already locking)
+      correct &&
+      phase === "answered" &&
+      sessionMode !== "test" &&
+      !lockItInActive
+    ) {
+      setLockItInActive(true);
+      setLockItInWordId(currentWord?.id ?? null);
+      setInput("");
+      setPhase("ready");
+      return;
+    }
+
     // Learn mode: wrong answer = try again
     if (sessionMode === "learn" && !correct && phase === "answered") {
       setInput("");
@@ -796,6 +946,8 @@ export function App({ onLogout }: AppProps) {
     lives,
     wordResults,
     finishSession,
+    lockItInActive,
+    currentWord,
   ]);
 
   // ── Recovery from out-of-lives ──
@@ -1237,10 +1389,8 @@ export function App({ onLogout }: AppProps) {
     if (sessionStage === "letter_tray") {
       const ltWord = sessionWords[letterTrayIndex];
       if (!ltWord) {
-        setSessionStage("hear_and_spell");
-        setWordIndex(0);
-        setInput("");
-        setPhase("ready");
+        setSessionStage("syllable_spell");
+        setSyllableSpellIndex(0);
         return null;
       }
 
@@ -1276,6 +1426,55 @@ export function App({ onLogout }: AppProps) {
             <LetterTray
               word={ltWord}
               onComplete={handleLetterTrayComplete}
+            />
+          </main>
+        </div>
+      );
+    }
+
+    // ── SYLLABLE SPELL STAGE ──
+    if (sessionStage === "syllable_spell") {
+      const ssWord = sessionWords[syllableSpellIndex];
+      if (!ssWord) {
+        setSessionStage("hear_and_spell");
+        setWordIndex(0);
+        setInput("");
+        setPhase("ready");
+        return null;
+      }
+
+      return (
+        <div className="app">
+          {header}
+          <div className="stats-bar">
+            <div className="stat">
+              <span className="stat-value">{stats.totalPoints}</span>
+              <span className="stat-label">XP</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{stats.currentStreak}</span>
+              <span className="stat-label">day streak</span>
+            </div>
+          </div>
+          {newBadgeFlash && (
+            <div className="badge-flash">
+              <span className={`badge-flash-icon badge-icon-${newBadgeFlash.icon}`} />
+              <span className="badge-flash-text">{newBadgeFlash.name}</span>
+            </div>
+          )}
+          <main className="card">
+            <div className="session-header">
+              <span className={`mode-badge mode-${sessionMode}`}>
+                {modeBadge}
+              </span>
+              <span className="word-progress">
+                {syllableSpellIndex + 1} / {sessionWords.length}
+              </span>
+            </div>
+            <p className="stage-label">Spell it syllable by syllable</p>
+            <SyllableSpell
+              word={ssWord}
+              onComplete={handleSyllableSpellComplete}
             />
           </main>
         </div>
@@ -1334,10 +1533,8 @@ export function App({ onLogout }: AppProps) {
     if (sessionStage === "sentence_fill") {
       const sfWord = sessionWords[sentenceFillIndex];
       if (!sfWord) {
-        setSessionStage("hear_and_spell");
-        setWordIndex(0);
-        setInput("");
-        setPhase("ready");
+        setSessionStage("proofreading");
+        setProofreadingIndex(0);
         return null;
       }
 
@@ -1374,6 +1571,57 @@ export function App({ onLogout }: AppProps) {
             <SentenceFill
               word={sfWord}
               onComplete={handleSentenceFillComplete}
+            />
+          </main>
+        </div>
+      );
+    }
+
+    // ── PROOFREADING STAGE ──
+    if (sessionStage === "proofreading") {
+      const prWord = sessionWords[proofreadingIndex];
+      if (!prWord) {
+        setSessionStage("hear_and_spell");
+        setWordIndex(0);
+        setInput("");
+        setPhase("ready");
+        return null;
+      }
+
+      return (
+        <div className="app">
+          {header}
+          <div className="stats-bar">
+            <div className="stat">
+              <span className="stat-value">{stats.totalPoints}</span>
+              <span className="stat-label">XP</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{stats.currentStreak}</span>
+              <span className="stat-label">day streak</span>
+            </div>
+            {heartsDisplay}
+          </div>
+          {newBadgeFlash && (
+            <div className="badge-flash">
+              <span className={`badge-flash-icon badge-icon-${newBadgeFlash.icon}`} />
+              <span className="badge-flash-text">{newBadgeFlash.name}</span>
+            </div>
+          )}
+          <main className="card">
+            <div className="session-header">
+              <span className={`mode-badge mode-${sessionMode}`}>
+                {modeBadge}
+              </span>
+              <span className="word-progress">
+                {proofreadingIndex + 1} / {sessionWords.length}
+              </span>
+            </div>
+            <p className="stage-label">Find and fix the misspelling</p>
+            <Proofreading
+              word={prWord}
+              pastMistakes={pastMistakesMap[prWord.id]}
+              onComplete={handleProofreadingComplete}
             />
           </main>
         </div>
@@ -1435,7 +1683,7 @@ export function App({ onLogout }: AppProps) {
     }
 
     const progress = `${wordIndex + 1} / ${sessionWords.length}`;
-    const showDefinition = sessionMode !== "test";
+    const showDefinition = sessionMode !== "test" && !lockItInActive;
     const canReplay =
       sessionMode !== "test" ||
       testReplaysUsed < TEST_MAX_REPLAYS ||
@@ -1476,21 +1724,27 @@ export function App({ onLogout }: AppProps) {
             {inRetest && <span className="retest-badge">Retest</span>}
           </div>
 
+          {lockItInActive && (
+            <p className="lock-label">Lock it in! Spell it again from memory.</p>
+          )}
+
           {showDefinition && (
             <p className="definition">{currentWord.definition}</p>
           )}
 
-          <button
-            className="btn btn-hear"
-            onClick={hearWord}
-            type="button"
-            disabled={!canReplay}
-          >
-            <span className="btn-icon">&#x1f50a;</span>
-            {sessionMode === "test" && phase === "ready"
-              ? `Hear the word (${TEST_MAX_REPLAYS - testReplaysUsed} left)`
-              : "Hear the word"}
-          </button>
+          {!lockItInActive && (
+            <button
+              className="btn btn-hear"
+              onClick={hearWord}
+              type="button"
+              disabled={!canReplay}
+            >
+              <span className="btn-icon">&#x1f50a;</span>
+              {sessionMode === "test" && phase === "ready"
+                ? `Hear the word (${TEST_MAX_REPLAYS - testReplaysUsed} left)`
+                : "Hear the word"}
+            </button>
+          )}
 
           <input
             ref={inputRef}
@@ -1532,16 +1786,18 @@ export function App({ onLogout }: AppProps) {
                 </p>
               )}
               <button className="btn btn-next" onClick={nextWord} type="button">
-                {sessionMode === "learn" && !correct
-                  ? "Try again"
-                  : wordIndex + 1 < sessionWords.length
-                    ? "Next word"
-                    : sessionMode === "learn" && learnRetestQueue.length > 0
-                      ? "Start retest"
-                      : sessionMode === "practice" &&
-                          practiceMissedQueue.length > 0
-                        ? "Review missed words"
-                        : "Finish"}
+                {lockItInActive
+                  ? "Continue"
+                  : sessionMode === "learn" && !correct
+                    ? "Try again"
+                    : wordIndex + 1 < sessionWords.length
+                      ? "Next word"
+                      : sessionMode === "learn" && learnRetestQueue.length > 0
+                        ? "Start retest"
+                        : sessionMode === "practice" &&
+                            practiceMissedQueue.length > 0
+                          ? "Review missed words"
+                          : "Finish"}
               </button>
             </div>
           )}
