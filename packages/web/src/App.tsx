@@ -22,6 +22,8 @@ import { PickSpelling } from "./PickSpelling";
 import { MatchExercise } from "./MatchExercise";
 import { MissingLetters } from "./MissingLetters";
 import { LetterTray } from "./LetterTray";
+import { WordJumble } from "./WordJumble";
+import { SentenceFill } from "./SentenceFill";
 import "./App.css";
 
 // ────────────────────────────────────────────────
@@ -33,7 +35,9 @@ type Screen =
   | "placement-results"
   | "home"
   | "session"
-  | "session-results";
+  | "session-results"
+  | "speed-round"
+  | "speed-round-results";
 
 type SessionMode = "learn" | "practice" | "test";
 
@@ -42,6 +46,8 @@ type SessionStage =
   | "pick_spelling"
   | "missing_letters"
   | "letter_tray"
+  | "word_jumble"
+  | "sentence_fill"
   | "hear_and_spell"
   | "out_of_lives";
 
@@ -119,6 +125,21 @@ export function App({ onLogout }: AppProps) {
   // Letter tray stage index
   const [letterTrayIndex, setLetterTrayIndex] = useState(0);
 
+  // Word jumble stage index
+  const [wordJumbleIndex, setWordJumbleIndex] = useState(0);
+
+  // Sentence fill stage index
+  const [sentenceFillIndex, setSentenceFillIndex] = useState(0);
+
+  // Speed round state
+  const [speedTimer, setSpeedTimer] = useState(60);
+  const [speedWords, setSpeedWords] = useState<WordFromApi[]>([]);
+  const [speedIndex, setSpeedIndex] = useState(0);
+  const [speedCorrect, setSpeedCorrect] = useState(0);
+  const [speedTotal, setSpeedTotal] = useState(0);
+  const [speedInput, setSpeedInput] = useState("");
+  const [speedPhase, setSpeedPhase] = useState<"ready" | "answered">("ready");
+
   // Badges
   const [badges, setBadges] = useState<Badge[]>([]);
   const [newBadgeFlash, setNewBadgeFlash] = useState<{
@@ -177,7 +198,11 @@ export function App({ onLogout }: AppProps) {
           ? sessionWords[missingLettersIndex] ?? null
           : sessionStage === "letter_tray"
             ? sessionWords[letterTrayIndex] ?? null
-            : sessionWords[wordIndex] ?? null;
+            : sessionStage === "word_jumble"
+              ? sessionWords[wordJumbleIndex] ?? null
+              : sessionStage === "sentence_fill"
+                ? sessionWords[sentenceFillIndex] ?? null
+                : sessionWords[wordIndex] ?? null;
 
   // Focus input when word changes (hear_and_spell / placement)
   useEffect(() => {
@@ -220,6 +245,8 @@ export function App({ onLogout }: AppProps) {
       setPickSpellingIndex(0);
       setMissingLettersIndex(0);
       setLetterTrayIndex(0);
+      setWordJumbleIndex(0);
+      setSentenceFillIndex(0);
       setSessionResult(null);
 
       // Set lives and initial stage based on mode
@@ -249,10 +276,9 @@ export function App({ onLogout }: AppProps) {
       setSessionStage("pick_spelling");
       setPickSpellingIndex(0);
     } else {
-      setSessionStage("hear_and_spell");
-      setWordIndex(0);
-      setInput("");
-      setPhase("ready");
+      // Practice mode: match → word_jumble
+      setSessionStage("word_jumble");
+      setWordJumbleIndex(0);
     }
   }, [sessionMode]);
 
@@ -369,6 +395,78 @@ export function App({ onLogout }: AppProps) {
       }
     },
     [letterTrayIndex, sessionWords, flashBadge],
+  );
+
+  // ── Word jumble complete for one word ──
+  const handleWordJumbleComplete = useCallback(
+    async (isCorrect: boolean, answerGiven: string) => {
+      const wjWord = sessionWords[wordJumbleIndex];
+      if (!wjWord) return;
+
+      try {
+        const result = await postAttempt({
+          wordId: wjWord.id,
+          correct: isCorrect,
+          answerGiven,
+          exerciseType: "word_jumble",
+          mode: sessionMode,
+        });
+        const newStats = await fetchStats();
+        setStats(newStats);
+        if (result.newBadges && result.newBadges.length > 0) {
+          flashBadge(result.newBadges[0]);
+        }
+      } catch (err) {
+        console.error("Failed to record word jumble attempt:", err);
+      }
+
+      const nextIdx = wordJumbleIndex + 1;
+      if (nextIdx < sessionWords.length) {
+        setWordJumbleIndex(nextIdx);
+      } else {
+        // All word-jumble done, move to sentence_fill
+        setSessionStage("sentence_fill");
+        setSentenceFillIndex(0);
+      }
+    },
+    [wordJumbleIndex, sessionWords, sessionMode, flashBadge],
+  );
+
+  // ── Sentence fill complete for one word ──
+  const handleSentenceFillComplete = useCallback(
+    async (isCorrect: boolean, answerGiven: string) => {
+      const sfWord = sessionWords[sentenceFillIndex];
+      if (!sfWord) return;
+
+      try {
+        const result = await postAttempt({
+          wordId: sfWord.id,
+          correct: isCorrect,
+          answerGiven,
+          exerciseType: "sentence_fill",
+          mode: sessionMode,
+        });
+        const newStats = await fetchStats();
+        setStats(newStats);
+        if (result.newBadges && result.newBadges.length > 0) {
+          flashBadge(result.newBadges[0]);
+        }
+      } catch (err) {
+        console.error("Failed to record sentence fill attempt:", err);
+      }
+
+      const nextIdx = sentenceFillIndex + 1;
+      if (nextIdx < sessionWords.length) {
+        setSentenceFillIndex(nextIdx);
+      } else {
+        // All sentence-fill done, move to hear_and_spell
+        setSessionStage("hear_and_spell");
+        setWordIndex(0);
+        setInput("");
+        setPhase("ready");
+      }
+    },
+    [sentenceFillIndex, sessionWords, sessionMode, flashBadge],
   );
 
   // ── Placement quiz ──
@@ -504,6 +602,122 @@ export function App({ onLogout }: AppProps) {
     }
     setScreen("session-results");
   }, [wordResults, sessionMode, flashBadge, currentAssignedTestId]);
+
+  // ── Speed round ──
+  const speedTimerRef = useRef(60);
+  const speedRoundActiveRef = useRef(false);
+
+  const finishSpeedRound = useCallback(async () => {
+    speedRoundActiveRef.current = false;
+    try {
+      if (speedTotal > 0) {
+        await postSession({
+          mode: "practice",
+          totalWords: speedTotal,
+          correctCount: speedCorrect,
+        });
+      }
+      const newStats = await fetchStats();
+      setStats(newStats);
+    } catch (err) {
+      console.error("Failed to record speed round session:", err);
+    }
+    setScreen("speed-round-results");
+  }, [speedTotal, speedCorrect]);
+
+  const startSpeedRound = useCallback(async () => {
+    try {
+      const data = await fetchSessionWords("practice", 30);
+      setSpeedWords(data.words);
+      setSpeedIndex(0);
+      setSpeedCorrect(0);
+      setSpeedTotal(0);
+      setSpeedTimer(60);
+      speedTimerRef.current = 60;
+      setSpeedInput("");
+      setSpeedPhase("ready");
+      speedRoundActiveRef.current = true;
+      setScreen("speed-round");
+    } catch (err) {
+      console.error("Failed to start speed round:", err);
+    }
+  }, []);
+
+  // Speed round timer
+  useEffect(() => {
+    if (screen !== "speed-round") return;
+    const interval = setInterval(() => {
+      speedTimerRef.current -= 1;
+      setSpeedTimer(speedTimerRef.current);
+      if (speedTimerRef.current <= 0) {
+        clearInterval(interval);
+        speedRoundActiveRef.current = false;
+        // Use a timeout to let the last state settle
+        setTimeout(() => finishSpeedRound(), 50);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [screen, finishSpeedRound]);
+
+  const speedCurrentWord = speedWords[speedIndex % speedWords.length] ?? null;
+
+  const hearSpeedWord = useCallback(() => {
+    if (!speedCurrentWord) return;
+    const text =
+      speedCurrentWord.pronunciationOverride ??
+      speedCurrentWord.pronunciation_override ??
+      speedCurrentWord.word;
+    speak(text);
+  }, [speedCurrentWord]);
+
+  const checkSpeedAnswer = useCallback(async () => {
+    if (!speedInput.trim() || !speedCurrentWord || !speedRoundActiveRef.current) return;
+    const isCorrect =
+      speedInput.trim().toLowerCase() === speedCurrentWord.word.toLowerCase();
+    setSpeedPhase("answered");
+
+    // Record attempt
+    try {
+      await postAttempt({
+        wordId: speedCurrentWord.id,
+        correct: isCorrect,
+        answerGiven: speedInput.trim(),
+        exerciseType: "speed_round",
+        mode: "practice",
+      });
+    } catch (err) {
+      console.error("Failed to record speed attempt:", err);
+    }
+
+    setSpeedTotal((prev) => prev + 1);
+    if (isCorrect) {
+      setSpeedCorrect((prev) => prev + 1);
+      // Auto-advance quickly on correct
+      setTimeout(() => {
+        if (!speedRoundActiveRef.current) return;
+        setSpeedIndex((prev) => prev + 1);
+        setSpeedInput("");
+        setSpeedPhase("ready");
+      }, 300);
+    } else {
+      // Show correct answer briefly, then advance
+      setTimeout(() => {
+        if (!speedRoundActiveRef.current) return;
+        setSpeedIndex((prev) => prev + 1);
+        setSpeedInput("");
+        setSpeedPhase("ready");
+      }, 1200);
+    }
+  }, [speedInput, speedCurrentWord]);
+
+  const handleSpeedKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && speedPhase === "ready") {
+        checkSpeedAnswer();
+      }
+    },
+    [speedPhase, checkSpeedAnswer],
+  );
 
   // ── Next word (hear_and_spell) ──
   const nextWord = useCallback(async () => {
@@ -724,6 +938,10 @@ export function App({ onLogout }: AppProps) {
             </>
           )}
         </main>
+
+        <button className="btn-link teacher-link" onClick={onLogout} type="button">
+          Sign out
+        </button>
       </div>
     );
   }
@@ -844,6 +1062,17 @@ export function App({ onLogout }: AppProps) {
           </button>
           <p className="mode-desc">
             Graded quiz. One chance per word, limited replays.
+          </p>
+
+          <button
+            className="btn btn-speed"
+            onClick={startSpeedRound}
+            type="button"
+          >
+            Speed Round
+          </button>
+          <p className="mode-desc">
+            60-second sprint. Spell as many words as you can for bonus XP.
           </p>
         </main>
 
@@ -1047,6 +1276,104 @@ export function App({ onLogout }: AppProps) {
             <LetterTray
               word={ltWord}
               onComplete={handleLetterTrayComplete}
+            />
+          </main>
+        </div>
+      );
+    }
+
+    // ── WORD JUMBLE STAGE ──
+    if (sessionStage === "word_jumble") {
+      const wjWord = sessionWords[wordJumbleIndex];
+      if (!wjWord) {
+        setSessionStage("sentence_fill");
+        setSentenceFillIndex(0);
+        return null;
+      }
+
+      return (
+        <div className="app">
+          {header}
+          <div className="stats-bar">
+            <div className="stat">
+              <span className="stat-value">{stats.totalPoints}</span>
+              <span className="stat-label">XP</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{stats.currentStreak}</span>
+              <span className="stat-label">day streak</span>
+            </div>
+            {heartsDisplay}
+          </div>
+          {newBadgeFlash && (
+            <div className="badge-flash">
+              <span className={`badge-flash-icon badge-icon-${newBadgeFlash.icon}`} />
+              <span className="badge-flash-text">{newBadgeFlash.name}</span>
+            </div>
+          )}
+          <main className="card">
+            <div className="session-header">
+              <span className={`mode-badge mode-${sessionMode}`}>
+                {modeBadge}
+              </span>
+              <span className="word-progress">
+                {wordJumbleIndex + 1} / {sessionWords.length}
+              </span>
+            </div>
+            <p className="stage-label">Unscramble the letters</p>
+            <WordJumble
+              word={wjWord}
+              onComplete={handleWordJumbleComplete}
+            />
+          </main>
+        </div>
+      );
+    }
+
+    // ── SENTENCE FILL STAGE ──
+    if (sessionStage === "sentence_fill") {
+      const sfWord = sessionWords[sentenceFillIndex];
+      if (!sfWord) {
+        setSessionStage("hear_and_spell");
+        setWordIndex(0);
+        setInput("");
+        setPhase("ready");
+        return null;
+      }
+
+      return (
+        <div className="app">
+          {header}
+          <div className="stats-bar">
+            <div className="stat">
+              <span className="stat-value">{stats.totalPoints}</span>
+              <span className="stat-label">XP</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{stats.currentStreak}</span>
+              <span className="stat-label">day streak</span>
+            </div>
+            {heartsDisplay}
+          </div>
+          {newBadgeFlash && (
+            <div className="badge-flash">
+              <span className={`badge-flash-icon badge-icon-${newBadgeFlash.icon}`} />
+              <span className="badge-flash-text">{newBadgeFlash.name}</span>
+            </div>
+          )}
+          <main className="card">
+            <div className="session-header">
+              <span className={`mode-badge mode-${sessionMode}`}>
+                {modeBadge}
+              </span>
+              <span className="word-progress">
+                {sentenceFillIndex + 1} / {sessionWords.length}
+              </span>
+            </div>
+            <p className="stage-label">Type the word in the sentence</p>
+            <SentenceFill
+              word={sfWord}
+              onComplete={handleSentenceFillComplete}
             />
           </main>
         </div>
@@ -1295,6 +1622,135 @@ export function App({ onLogout }: AppProps) {
             onClick={() => {
               Promise.all([fetchStats(), fetchBadges(), fetchPendingTest()])
                 .then(([s, b, pt]) => { setStats(s); setBadges(b); setPendingTest(pt); })
+                .catch(console.error);
+              setScreen("home");
+            }}
+            type="button"
+          >
+            Back to home
+          </button>
+        </main>
+      </div>
+    );
+  }
+
+  // ────────────────────────────────────────
+  // SPEED ROUND
+  // ────────────────────────────────────────
+  if (screen === "speed-round") {
+    return (
+      <div className="app">
+        {header}
+
+        <p
+          className={`speed-timer ${speedTimer <= 10 ? "speed-timer-low" : ""}`}
+        >
+          {speedTimer}
+        </p>
+
+        <div className="speed-stats">
+          <span>{speedCorrect} correct</span>
+          <span>{speedTotal} total</span>
+        </div>
+
+        {speedCurrentWord && (
+          <main className="card">
+            <p className="definition">{speedCurrentWord.definition}</p>
+
+            <button
+              className="btn btn-hear"
+              onClick={hearSpeedWord}
+              type="button"
+            >
+              <span className="btn-icon">&#x1f50a;</span> Hear the word
+            </button>
+
+            <input
+              className="spelling-input"
+              type="text"
+              value={speedInput}
+              onChange={(e) => setSpeedInput(e.target.value)}
+              onKeyDown={handleSpeedKeyDown}
+              placeholder="Type the spelling..."
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              disabled={speedPhase === "answered"}
+              data-gramm="false"
+            />
+
+            {speedPhase === "ready" && (
+              <button
+                className="btn btn-check"
+                onClick={checkSpeedAnswer}
+                disabled={!speedInput.trim()}
+                type="button"
+              >
+                Go!
+              </button>
+            )}
+
+            {speedPhase === "answered" && (
+              <div
+                className={`result ${
+                  speedInput.trim().toLowerCase() ===
+                  speedCurrentWord.word.toLowerCase()
+                    ? "result-correct"
+                    : "result-wrong"
+                }`}
+              >
+                <p className="result-text">
+                  {speedInput.trim().toLowerCase() ===
+                  speedCurrentWord.word.toLowerCase()
+                    ? "Correct!"
+                    : speedCurrentWord.word}
+                </p>
+              </div>
+            )}
+          </main>
+        )}
+      </div>
+    );
+  }
+
+  // ────────────────────────────────────────
+  // SPEED ROUND RESULTS
+  // ────────────────────────────────────────
+  if (screen === "speed-round-results") {
+    const accuracy =
+      speedTotal > 0 ? Math.round((speedCorrect / speedTotal) * 100) : 0;
+
+    return (
+      <div className="app">
+        {header}
+
+        <main className="card">
+          <p className="result-text" style={{ color: "var(--color-main)" }}>
+            Speed Round Complete
+          </p>
+
+          <div className="session-score">
+            <span className="score-big">{speedCorrect}</span>
+            <span className="score-detail">
+              words spelled correctly in 60 seconds
+            </span>
+          </div>
+
+          <div className="speed-results-detail">
+            <span>Accuracy: {accuracy}%</span>
+            <span>Total attempts: {speedTotal}</span>
+          </div>
+
+          <button
+            className="btn btn-check"
+            onClick={() => {
+              Promise.all([fetchStats(), fetchBadges(), fetchPendingTest()])
+                .then(([s, b, pt]) => {
+                  setStats(s);
+                  setBadges(b);
+                  setPendingTest(pt);
+                })
                 .catch(console.error);
               setScreen("home");
             }}
