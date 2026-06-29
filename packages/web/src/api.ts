@@ -148,12 +148,25 @@ export interface TestResult {
   levelAtEnd: number;
   createdAt: string;
   words: Array<{
+    attemptId: number;
     wordId: number;
     word: string;
     grade: number;
     correct: boolean;
     answerGiven: string;
+    pronunciationOverride: string | null;
   }>;
+}
+
+export interface TroubleWord {
+  id: number;
+  word: string;
+  grade: number;
+  definition: string;
+  missCount: number;
+  totalAttempts: number;
+  missRate: number;
+  masteryScore: number;
 }
 
 // ── Token management ────────────────────────────────────────────
@@ -472,4 +485,46 @@ export async function completeAssignedTest(
     body: JSON.stringify({ sessionId }),
   });
   if (!res.ok) throw new Error("Failed to complete assigned test");
+}
+
+// ── Teacher: Trouble words ────────────────────────────────────
+
+export async function fetchTroubleWords(
+  childId: number,
+): Promise<TroubleWord[]> {
+  const res = await fetch(`/api/teacher/children/${childId}/trouble-words`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to load trouble words");
+  return res.json();
+}
+
+// ── Teacher: Excuse attempt ───────────────────────────────────
+
+export async function excuseAttempt(
+  attemptId: number,
+  childId: number,
+): Promise<{ excused: boolean; newMasteryScore?: number }> {
+  const res = await fetch("/api/teacher/excuse-attempt", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ attemptId, childId }),
+  });
+  if (!res.ok) throw new Error("Failed to excuse attempt");
+  return res.json();
+}
+
+// ── Teacher: Pronunciation override ───────────────────────────
+
+export async function setPronunciationOverride(
+  wordId: number,
+  pronunciationOverride: string,
+): Promise<{ wordId: number; pronunciationOverride: string | null }> {
+  const res = await fetch(`/api/teacher/words/${wordId}/pronunciation`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ pronunciationOverride }),
+  });
+  if (!res.ok) throw new Error("Failed to update pronunciation");
+  return res.json();
 }

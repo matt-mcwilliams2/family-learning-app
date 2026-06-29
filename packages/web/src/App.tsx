@@ -862,7 +862,7 @@ export function App({ onLogout }: AppProps) {
         )}
 
         <button className="btn-link teacher-link" onClick={onLogout} type="button">
-          Switch profile
+          Sign out
         </button>
       </div>
     );

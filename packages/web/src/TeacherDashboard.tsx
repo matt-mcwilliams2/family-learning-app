@@ -9,10 +9,14 @@ import {
   assignTest,
   fetchAssignedTests,
   triggerPlacement,
+  fetchTroubleWords,
+  excuseAttempt,
+  setPronunciationOverride,
   type ChildSummary,
   type WordStatus,
   type TestResult,
   type AssignedTest,
+  type TroubleWord,
 } from "./api";
 
 interface TeacherDashboardProps {
@@ -49,6 +53,14 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
   const [placementLoading, setPlacementLoading] = useState(false);
   const [placementMsg, setPlacementMsg] = useState<string | null>(null);
 
+  // Trouble words state
+  const [troubleWords, setTroubleWords] = useState<TroubleWord[]>([]);
+
+  // Override state (per-attempt excuse, per-word pronunciation)
+  const [excusingId, setExcusingId] = useState<number | null>(null);
+  const [pronEditWordId, setPronEditWordId] = useState<number | null>(null);
+  const [pronInput, setPronInput] = useState("");
+
   useEffect(() => {
     fetchChildren()
       .then((c) => {
@@ -66,7 +78,11 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
   useEffect(() => {
     if (!selectedChild) return;
 
-    if (tab === "words") {
+    if (tab === "overview") {
+      fetchTroubleWords(selectedChild.id)
+        .then(setTroubleWords)
+        .catch(console.error);
+    } else if (tab === "words") {
       fetchChildWords(selectedChild.id)
         .then(setWords)
         .catch(console.error);
@@ -202,6 +218,67 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
       setPlacementLoading(false);
     }
   }, [selectedChild, placementGrade]);
+
+  // ── Excuse attempt handler ──
+  const handleExcuse = useCallback(
+    async (attemptId: number, testId: number) => {
+      if (!selectedChild) return;
+      setExcusingId(attemptId);
+      try {
+        const result = await excuseAttempt(attemptId, selectedChild.id);
+        if (result.excused) {
+          // Refresh test data to reflect updated scores
+          const updated = await fetchChildTests(selectedChild.id);
+          setTests(updated);
+        }
+      } catch (err) {
+        console.error("Failed to excuse attempt:", err);
+      } finally {
+        setExcusingId(null);
+      }
+    },
+    [selectedChild],
+  );
+
+  // ── Pronunciation override handler ──
+  const handlePronSave = useCallback(
+    async (wordId: number) => {
+      try {
+        await setPronunciationOverride(wordId, pronInput);
+        // Update local test data to reflect the change
+        setTests((prev) =>
+          prev.map((t) => ({
+            ...t,
+            words: t.words.map((w) =>
+              w.wordId === wordId
+                ? { ...w, pronunciationOverride: pronInput.trim() || null }
+                : w,
+            ),
+          })),
+        );
+        setPronEditWordId(null);
+        setPronInput("");
+      } catch (err) {
+        console.error("Failed to update pronunciation:", err);
+      }
+    },
+    [pronInput],
+  );
+
+  // ── Re-teach trouble word (add back to rotation at current level) ──
+  const handleReteach = useCallback(
+    async (wordId: number, word: string) => {
+      if (!selectedChild) return;
+      try {
+        // Try adding the word — if it's already in rotation this will just restore it
+        await addChildWord(selectedChild.id, word, selectedChild.currentLevel);
+        setTroubleWords((prev) => prev.filter((tw) => tw.id !== wordId));
+      } catch (err) {
+        console.error("Failed to reteach word:", err);
+      }
+    },
+    [selectedChild],
+  );
 
   const header = (
     <header className="header">
@@ -424,6 +501,38 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
                   )}
                 </div>
               </div>
+
+              {/* ── Words to Watch ── */}
+              {troubleWords.length > 0 && (
+                <div className="overview-section">
+                  <p className="overview-label">Words to Watch</p>
+                  <p className="trouble-sub">
+                    Words he keeps missing — tap to roll into his rotation.
+                  </p>
+                  <div className="trouble-list">
+                    {troubleWords.map((tw) => (
+                      <div key={tw.id} className="trouble-row">
+                        <div className="trouble-row-main">
+                          <span className="trouble-word">{tw.word}</span>
+                          <span className="trouble-stats">
+                            {tw.missCount} missed / {tw.totalAttempts} tries
+                          </span>
+                        </div>
+                        <div className="trouble-row-detail">
+                          <span className="trouble-def">{tw.definition}</span>
+                          <button
+                            className="btn-link-inline"
+                            onClick={() => handleReteach(tw.id, tw.word)}
+                            type="button"
+                          >
+                            Re-teach
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </main>
           )}
 
@@ -642,9 +751,9 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
 
                         {expandedTest === t.id && t.words.length > 0 && (
                           <div className="test-breakdown">
-                            {t.words.map((w, i) => (
+                            {t.words.map((w) => (
                               <div
-                                key={i}
+                                key={w.attemptId}
                                 className={`test-word-row ${
                                   w.correct
                                     ? "test-word-correct"
@@ -656,9 +765,75 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
                                 </span>
                                 <span className="test-word-text">{w.word}</span>
                                 {!w.correct && (
-                                  <span className="test-word-given">
-                                    {w.answerGiven}
-                                  </span>
+                                  <>
+                                    <span className="test-word-given">
+                                      {w.answerGiven}
+                                    </span>
+                                    <button
+                                      className="btn-excuse"
+                                      onClick={() =>
+                                        handleExcuse(w.attemptId, t.id)
+                                      }
+                                      disabled={excusingId === w.attemptId}
+                                      title="Excuse this answer"
+                                      type="button"
+                                    >
+                                      {excusingId === w.attemptId
+                                        ? "..."
+                                        : "Excuse"}
+                                    </button>
+                                  </>
+                                )}
+                                {/* Pronunciation override */}
+                                {pronEditWordId === w.wordId ? (
+                                  <div className="pron-edit">
+                                    <input
+                                      className="pron-input"
+                                      type="text"
+                                      value={pronInput}
+                                      onChange={(e) =>
+                                        setPronInput(e.target.value)
+                                      }
+                                      placeholder="e.g. deh-zert"
+                                    />
+                                    <button
+                                      className="btn-link-inline"
+                                      onClick={() =>
+                                        handlePronSave(w.wordId)
+                                      }
+                                      type="button"
+                                    >
+                                      Save
+                                    </button>
+                                    <button
+                                      className="btn-link-inline"
+                                      onClick={() => {
+                                        setPronEditWordId(null);
+                                        setPronInput("");
+                                      }}
+                                      type="button"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    className="btn-pron"
+                                    onClick={() => {
+                                      setPronEditWordId(w.wordId);
+                                      setPronInput(
+                                        w.pronunciationOverride ?? "",
+                                      );
+                                    }}
+                                    title={
+                                      w.pronunciationOverride
+                                        ? `Override: ${w.pronunciationOverride}`
+                                        : "Set pronunciation override"
+                                    }
+                                    type="button"
+                                  >
+                                    {w.pronunciationOverride ? "voice*" : "voice"}
+                                  </button>
                                 )}
                               </div>
                             ))}

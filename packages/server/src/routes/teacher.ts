@@ -1,6 +1,8 @@
 import { Router } from "express";
 import pool from "../db.js";
 import { requireAuth, requireParent } from "../auth.js";
+import { computeMastery, getNextReviewDate } from "@family-learning/shared";
+import type { Attempt } from "@family-learning/shared";
 
 export const teacherRouter = Router();
 
@@ -237,7 +239,8 @@ teacherRouter.get("/children/:childId/tests", async (req, res) => {
       // Get attempts that fall within this test session's timeframe
       // We find attempts in test mode near the session time
       const attempts = await pool.query(
-        `SELECT a.word_id, a.correct, a.answer_given, w.word, w.grade
+        `SELECT a.id AS attempt_id, a.word_id, a.correct, a.answer_given,
+                w.word, w.grade, w.pronunciation_override
          FROM attempts a
          JOIN words w ON w.id = a.word_id
          WHERE a.user_id = $1
@@ -259,11 +262,13 @@ teacherRouter.get("/children/:childId/tests", async (req, res) => {
         levelAtEnd: parseFloat(session.level_at_end),
         createdAt: session.created_at,
         words: attempts.rows.map((a: any) => ({
+          attemptId: a.attempt_id,
           wordId: a.word_id,
           word: a.word,
           grade: parseFloat(a.grade),
           correct: a.correct,
           answerGiven: a.answer_given,
+          pronunciationOverride: a.pronunciation_override,
         })),
       });
     }
@@ -589,5 +594,230 @@ teacherRouter.get("/children/:childId/sessions", async (req, res) => {
   } catch (err) {
     console.error("GET /api/teacher/children/:childId/sessions error:", err);
     res.status(500).json({ error: "Failed to load sessions" });
+  }
+});
+
+// ── GET /api/teacher/children/:childId/trouble-words ──────────
+// Words the child keeps missing, pulled from the attempt log.
+teacherRouter.get("/children/:childId/trouble-words", async (req, res) => {
+  try {
+    const childId = parseInt(req.params.childId, 10);
+    const familyId = req.auth!.familyId;
+
+    const childCheck = await pool.query(
+      "SELECT id FROM users WHERE id = $1 AND family_id = $2 AND role = 'child'",
+      [childId, familyId],
+    );
+    if (childCheck.rows.length === 0) {
+      res.status(404).json({ error: "Child not found" });
+      return;
+    }
+
+    const result = await pool.query(
+      `SELECT w.id, w.word, w.grade, w.definition,
+              COUNT(*) FILTER (WHERE a.correct = false) AS miss_count,
+              COUNT(*) AS total_attempts,
+              ROUND(
+                COUNT(*) FILTER (WHERE a.correct = false)::numeric
+                / GREATEST(COUNT(*)::numeric, 1), 2
+              ) AS miss_rate,
+              COALESCE(wm.mastery_score, 0) AS mastery_score
+       FROM attempts a
+       JOIN words w ON w.id = a.word_id
+       LEFT JOIN word_mastery wm
+         ON wm.word_id = w.id AND wm.user_id = a.user_id AND wm.app = 'spelling'
+       LEFT JOIN excluded_words ew
+         ON ew.word_id = w.id AND ew.child_id = $1
+       WHERE a.user_id = $1
+         AND a.app = 'spelling'
+         AND ew.word_id IS NULL
+       GROUP BY w.id, w.word, w.grade, w.definition, wm.mastery_score
+       HAVING COUNT(*) FILTER (WHERE a.correct = false) >= 2
+       ORDER BY miss_rate DESC, miss_count DESC
+       LIMIT 10`,
+      [childId],
+    );
+
+    res.json(
+      result.rows.map((r: any) => ({
+        id: r.id,
+        word: r.word,
+        grade: parseFloat(r.grade),
+        definition: r.definition,
+        missCount: parseInt(r.miss_count, 10),
+        totalAttempts: parseInt(r.total_attempts, 10),
+        missRate: parseFloat(r.miss_rate),
+        masteryScore: parseFloat(r.mastery_score),
+      })),
+    );
+  } catch (err) {
+    console.error("GET /api/teacher/children/:childId/trouble-words error:", err);
+    res.status(500).json({ error: "Failed to load trouble words" });
+  }
+});
+
+// ── POST /api/teacher/excuse-attempt ──────────────────────────
+// Excuse a wrong answer: flip attempt to correct, recompute mastery,
+// update the session stats.
+// Body: { attemptId, childId }
+teacherRouter.post("/excuse-attempt", async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const familyId = req.auth!.familyId;
+    const { attemptId, childId } = req.body;
+
+    if (typeof attemptId !== "number" || typeof childId !== "number") {
+      res.status(400).json({ error: "attemptId and childId are required" });
+      return;
+    }
+
+    // Verify child belongs to this family
+    const childCheck = await client.query(
+      "SELECT id FROM users WHERE id = $1 AND family_id = $2 AND role = 'child'",
+      [childId, familyId],
+    );
+    if (childCheck.rows.length === 0) {
+      res.status(404).json({ error: "Child not found" });
+      return;
+    }
+
+    // Get the attempt and verify it belongs to this child and is currently wrong
+    const attemptCheck = await client.query(
+      "SELECT id, word_id, correct, mode, created_at FROM attempts WHERE id = $1 AND user_id = $2",
+      [attemptId, childId],
+    );
+    if (attemptCheck.rows.length === 0) {
+      res.status(404).json({ error: "Attempt not found" });
+      return;
+    }
+    if (attemptCheck.rows[0].correct) {
+      res.json({ excused: false, message: "Already marked correct" });
+      return;
+    }
+
+    const wordId = attemptCheck.rows[0].word_id;
+    const attemptTime = attemptCheck.rows[0].created_at;
+
+    await client.query("BEGIN");
+
+    // 1. Flip the attempt to correct
+    await client.query(
+      "UPDATE attempts SET correct = true WHERE id = $1",
+      [attemptId],
+    );
+
+    // 2. Recompute mastery for this word
+    const attemptsRows = await client.query(
+      `SELECT id, user_id, word_id, app, exercise_type, mode, correct,
+              answer_given, created_at
+       FROM attempts
+       WHERE user_id = $1 AND word_id = $2 AND app = 'spelling'
+       ORDER BY created_at DESC`,
+      [childId, wordId],
+    );
+
+    const attempts: Attempt[] = attemptsRows.rows.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id,
+      wordId: r.word_id,
+      app: r.app,
+      exerciseType: r.exercise_type,
+      mode: r.mode,
+      correct: r.correct,
+      answerGiven: r.answer_given,
+      createdAt: new Date(r.created_at),
+    }));
+
+    const { score, hasEverMissed } = computeMastery(attempts);
+    const lastAttemptDate = new Date(
+      attemptsRows.rows[0]?.created_at ?? attemptTime,
+    );
+    const nextReview = getNextReviewDate(score, hasEverMissed, lastAttemptDate);
+
+    await client.query(
+      `INSERT INTO word_mastery (user_id, word_id, app, mastery_score, has_ever_missed,
+                                  attempt_count, next_review_at, last_attempted_at)
+       VALUES ($1, $2, 'spelling', $3, $4, $5, $6, $7)
+       ON CONFLICT (user_id, word_id, app)
+       DO UPDATE SET mastery_score = $3,
+                     has_ever_missed = $4,
+                     attempt_count = $5,
+                     next_review_at = $6,
+                     last_attempted_at = $7`,
+      [childId, wordId, score, hasEverMissed, attempts.length, nextReview, lastAttemptDate],
+    );
+
+    // 3. Update the session that this attempt belonged to
+    // Find the session matching this attempt's timeframe
+    const sessionMatch = await client.query(
+      `SELECT id, correct_count, total_words
+       FROM sessions
+       WHERE user_id = $1 AND app = 'spelling' AND mode = 'test'
+         AND created_at >= ($2::timestamptz - interval '1 minute')
+         AND created_at <= ($2::timestamptz + interval '1 hour')
+       LIMIT 1`,
+      [childId, attemptTime],
+    );
+
+    if (sessionMatch.rows.length > 0) {
+      const session = sessionMatch.rows[0];
+      const newCorrect = session.correct_count + 1;
+      const newAccuracy = session.total_words > 0
+        ? newCorrect / session.total_words
+        : 0;
+      await client.query(
+        "UPDATE sessions SET correct_count = $1, accuracy = $2 WHERE id = $3",
+        [newCorrect, newAccuracy, session.id],
+      );
+    }
+
+    await client.query("COMMIT");
+
+    res.json({
+      excused: true,
+      newMasteryScore: score,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("POST /api/teacher/excuse-attempt error:", err);
+    res.status(500).json({ error: "Failed to excuse attempt" });
+  } finally {
+    client.release();
+  }
+});
+
+// ── PUT /api/teacher/words/:wordId/pronunciation ──────────────
+// Set or clear the pronunciation override for a word.
+// Body: { pronunciationOverride }
+teacherRouter.put("/words/:wordId/pronunciation", async (req, res) => {
+  try {
+    const wordId = parseInt(req.params.wordId, 10);
+    const familyId = req.auth!.familyId;
+    const { pronunciationOverride } = req.body;
+
+    // Verify the word is either a bank word or belongs to this family
+    const wordCheck = await pool.query(
+      "SELECT id FROM words WHERE id = $1 AND (family_id IS NULL OR family_id = $2)",
+      [wordId, familyId],
+    );
+    if (wordCheck.rows.length === 0) {
+      res.status(404).json({ error: "Word not found" });
+      return;
+    }
+
+    const override =
+      typeof pronunciationOverride === "string" && pronunciationOverride.trim()
+        ? pronunciationOverride.trim()
+        : null;
+
+    await pool.query(
+      "UPDATE words SET pronunciation_override = $1 WHERE id = $2",
+      [override, wordId],
+    );
+
+    res.json({ wordId, pronunciationOverride: override });
+  } catch (err) {
+    console.error("PUT /api/teacher/words/:wordId/pronunciation error:", err);
+    res.status(500).json({ error: "Failed to update pronunciation" });
   }
 });
