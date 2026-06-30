@@ -71,10 +71,11 @@ const RECOVERY_LIVES = 2;
 const TEST_MAX_REPLAYS = 1;
 
 interface AppProps {
+  onBack?: () => void;
   onLogout: () => void;
 }
 
-export function App({ onLogout }: AppProps) {
+export function App({ onBack, onLogout }: AppProps) {
   // ── Screen state ──
   const [screen, setScreen] = useState<Screen>("loading");
   const [stats, setStats] = useState<Stats>({
@@ -1081,9 +1082,16 @@ export function App({ onLogout }: AppProps) {
           )}
         </main>
 
-        <button className="btn-link teacher-link" onClick={onLogout} type="button">
-          Sign out
-        </button>
+        <div className="teacher-link-group">
+          {onBack && (
+            <button className="btn-link teacher-link" onClick={onBack} type="button">
+              Back to apps
+            </button>
+          )}
+          <button className="btn-link teacher-link" onClick={onLogout} type="button">
+            Sign out
+          </button>
+        </div>
       </div>
     );
   }
@@ -1232,9 +1240,16 @@ export function App({ onLogout }: AppProps) {
           </div>
         )}
 
-        <button className="btn-link teacher-link" onClick={onLogout} type="button">
-          Sign out
-        </button>
+        <div className="teacher-link-group">
+          {onBack && (
+            <button className="btn-link teacher-link" onClick={onBack} type="button">
+              Back to apps
+            </button>
+          )}
+          <button className="btn-link teacher-link" onClick={onLogout} type="button">
+            Sign out
+          </button>
+        </div>
       </div>
     );
   }

@@ -25,12 +25,13 @@ import {
 } from "./api";
 
 interface TeacherDashboardProps {
+  onBack?: () => void;
   onLogout: () => void;
 }
 
 type Tab = "overview" | "words" | "tests" | "students";
 
-export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
+export function TeacherDashboard({ onBack, onLogout }: TeacherDashboardProps) {
   const [children, setChildren] = useState<ChildSummary[]>([]);
   const [selectedChild, setSelectedChild] = useState<ChildSummary | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
@@ -1242,9 +1243,16 @@ export function TeacherDashboard({ onLogout }: TeacherDashboardProps) {
         </>
       )}
 
-      <button className="btn-link teacher-link" onClick={onLogout} type="button">
-        Sign out
-      </button>
+      <div className="teacher-link-group">
+        {onBack && (
+          <button className="btn-link teacher-link" onClick={onBack} type="button">
+            Back to apps
+          </button>
+        )}
+        <button className="btn-link teacher-link" onClick={onLogout} type="button">
+          Sign out
+        </button>
+      </div>
     </div>
   );
 }

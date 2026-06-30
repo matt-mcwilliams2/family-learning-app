@@ -1894,3 +1894,168 @@
 .btn-danger-text {
   color: var(--color-third) !important;
 }
+
+/* ---- App chooser ---- */
+
+.btn-app-spelling {
+  background: var(--color-main);
+  color: var(--color-white);
+}
+
+.btn-app-math {
+  background: var(--color-third);
+  color: var(--color-white);
+}
+
+/* ---- Speed Math ---- */
+
+.btn-math-add {
+  background: #2e7d32;
+  color: var(--color-white);
+}
+
+.btn-math-sub {
+  background: var(--color-secondary);
+  color: var(--color-white);
+}
+
+.btn-math-mul {
+  background: var(--color-main);
+  color: var(--color-white);
+}
+
+.btn-math-div {
+  background: var(--color-accent);
+  color: var(--color-main);
+}
+
+.math-problem {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--color-main);
+  text-align: center;
+  letter-spacing: 1px;
+}
+
+.math-duration-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.btn-duration {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 80px;
+  padding: 14px 20px;
+  background: var(--color-main);
+  color: var(--color-white);
+}
+
+.math-new-record {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--color-accent);
+  text-align: center;
+  animation: pulse 1s ease-in-out infinite;
+  margin-bottom: 8px;
+}
+
+.math-elapsed {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-main);
+  text-align: center;
+}
+
+.math-best-time {
+  font-size: 16px;
+  font-weight: 600;
+  color: #666;
+  text-align: center;
+}
+
+.math-records-section {
+  width: 100%;
+  max-width: 400px;
+  margin-top: 16px;
+}
+
+.math-records-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.math-record-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--color-bg);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.math-record-op {
+  font-weight: 600;
+  color: var(--color-main);
+}
+
+.math-record-time {
+  font-weight: 700;
+  color: var(--color-accent);
+}
+
+/* ---- Math teacher view ---- */
+
+.math-sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.math-session-row {
+  padding: 8px 12px;
+  border: 1px solid #e8ebf0;
+  border-radius: 10px;
+  background: #fafbfc;
+}
+
+.math-session-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.math-session-op {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-main);
+}
+
+.math-session-date {
+  font-size: 12px;
+  color: #888;
+}
+
+.math-session-detail {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.math-session-time {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+/* ---- Shared link group ---- */
+
+.teacher-link-group {
+  display: flex;
+  gap: 16px;
+  margin-top: 20px;
+}

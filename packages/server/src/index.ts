@@ -17,6 +17,7 @@ import { placementRouter } from "./routes/placement.js";
 import { badgesRouter } from "./routes/badges.js";
 import { assignedTestsRouter } from "./routes/assigned-tests.js";
 import { adminRouter } from "./routes/admin.js";
+import { mathRouter } from "./routes/math.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -56,6 +57,7 @@ app.use("/api/sessions", requireAuth, sessionsRouter);
 app.use("/api/placement", requireAuth, placementRouter);
 app.use("/api/badges", requireAuth, badgesRouter);
 app.use("/api/assigned-tests", requireAuth, assignedTestsRouter);
+app.use("/api/math", requireAuth, mathRouter);
 
 // ---- Static files (built frontend) ----
 // Serve the Vite build from packages/web/dist whenever it exists.

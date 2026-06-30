@@ -195,6 +195,30 @@ ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('parent', 'chi
 ALTER TABLE users ALTER COLUMN family_id DROP NOT NULL;
 `;
 
+const UP_009 = `
+-- Speed Math tables
+CREATE TABLE IF NOT EXISTS math_sessions (
+  id              SERIAL PRIMARY KEY,
+  user_id         INTEGER NOT NULL REFERENCES users(id),
+  operation       TEXT NOT NULL CHECK (operation IN ('addition','subtraction','multiplication','division')),
+  duration_secs   INTEGER NOT NULL,
+  total_problems  INTEGER NOT NULL,
+  correct_count   INTEGER NOT NULL,
+  all_correct     BOOLEAN NOT NULL DEFAULT false,
+  elapsed_secs    INTEGER,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_math_sessions_user ON math_sessions(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS math_records (
+  user_id         INTEGER NOT NULL REFERENCES users(id),
+  operation       TEXT NOT NULL CHECK (operation IN ('addition','subtraction','multiplication','division')),
+  best_time_secs  INTEGER NOT NULL,
+  achieved_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, operation)
+);
+`;
+
 const MIGRATIONS: Migration[] = [
   { name: "001_initial_schema", sql: UP },
   { name: "002_mastery_and_sessions", sql: UP_002 },
@@ -204,6 +228,7 @@ const MIGRATIONS: Migration[] = [
   { name: "006_excluded_words_and_assigned_tests", sql: UP_006 },
   { name: "007_student_management", sql: UP_007 },
   { name: "008_admin_role", sql: UP_008 },
+  { name: "009_math_tables", sql: UP_009 },
 ];
 
 async function migrate() {

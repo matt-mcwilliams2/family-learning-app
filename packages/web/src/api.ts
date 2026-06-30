@@ -624,6 +624,111 @@ export async function deleteStudent(studentId: number): Promise<any> {
   return res.json();
 }
 
+// ── Speed Math API ────────────────────────────────────────────
+
+export type MathOperation = "addition" | "subtraction" | "multiplication" | "division";
+
+export interface MathSessionResult {
+  sessionId: number;
+  pointsAwarded: number;
+  newRecord: boolean;
+  bestTime: number | null;
+}
+
+export interface MathRecord {
+  bestTimeSecs: number;
+  achievedAt: string;
+}
+
+export interface MathRecords {
+  addition: MathRecord | null;
+  subtraction: MathRecord | null;
+  multiplication: MathRecord | null;
+  division: MathRecord | null;
+}
+
+export interface MathStats {
+  totalPoints: number;
+  currentStreak: number;
+  longestStreak: number;
+  lastActive: string | null;
+  records: MathRecords;
+}
+
+export interface MathSessionSummary {
+  id: number;
+  operation: MathOperation;
+  durationSecs: number;
+  totalProblems: number;
+  correctCount: number;
+  allCorrect: boolean;
+  elapsedSecs: number | null;
+  createdAt: string;
+}
+
+export async function postMathSession(params: {
+  operation: MathOperation;
+  durationSecs: number;
+  totalProblems: number;
+  correctCount: number;
+  allCorrect: boolean;
+  elapsedSecs?: number;
+}): Promise<MathSessionResult> {
+  const res = await fetch("/api/math/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error("Failed to record math session");
+  return res.json();
+}
+
+export async function fetchMathStats(): Promise<MathStats> {
+  const res = await fetch(`/api/math/stats/${getUserId()}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to load math stats");
+  return res.json();
+}
+
+export async function fetchMathRecords(): Promise<MathRecords> {
+  const res = await fetch(`/api/math/records/${getUserId()}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to load math records");
+  return res.json();
+}
+
+export async function fetchChildMathSessions(
+  childId: number,
+): Promise<MathSessionSummary[]> {
+  const res = await fetch(`/api/teacher/children/${childId}/math-sessions`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to load math sessions");
+  return res.json();
+}
+
+export async function fetchChildMathRecords(
+  childId: number,
+): Promise<MathRecords> {
+  const res = await fetch(`/api/teacher/children/${childId}/math-records`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to load math records");
+  return res.json();
+}
+
+export async function fetchChildMathStats(
+  childId: number,
+): Promise<{ totalPoints: number; currentStreak: number; longestStreak: number; lastActive: string | null }> {
+  const res = await fetch(`/api/teacher/children/${childId}/math-stats`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to load math stats");
+  return res.json();
+}
+
 // ── Admin API ─────────────────────────────────────────────────
 
 export async function loginAdmin(

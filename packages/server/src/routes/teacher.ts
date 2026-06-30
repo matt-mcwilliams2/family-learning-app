@@ -1048,3 +1048,119 @@ teacherRouter.delete("/students/:studentId", async (req, res) => {
     client.release();
   }
 });
+
+// ── Math: teacher endpoints ──────────────────────────────────
+
+// GET /api/teacher/children/:childId/math-sessions
+teacherRouter.get("/children/:childId/math-sessions", async (req, res) => {
+  try {
+    const childId = parseInt(req.params.childId, 10);
+    const familyId = req.auth!.familyId;
+
+    // Verify child belongs to this family
+    const child = await pool.query(
+      "SELECT id FROM users WHERE id = $1 AND family_id = $2 AND role = 'child'",
+      [childId, familyId],
+    );
+    if (child.rows.length === 0) {
+      res.status(404).json({ error: "Child not found" });
+      return;
+    }
+
+    const result = await pool.query(
+      `SELECT id, operation, duration_secs, total_problems, correct_count,
+              all_correct, elapsed_secs, created_at
+       FROM math_sessions
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [childId],
+    );
+
+    res.json(
+      result.rows.map((r: any) => ({
+        id: r.id,
+        operation: r.operation,
+        durationSecs: r.duration_secs,
+        totalProblems: r.total_problems,
+        correctCount: r.correct_count,
+        allCorrect: r.all_correct,
+        elapsedSecs: r.elapsed_secs,
+        createdAt: r.created_at,
+      })),
+    );
+  } catch (err) {
+    console.error("GET /api/teacher/children/:childId/math-sessions error:", err);
+    res.status(500).json({ error: "Failed to load math sessions" });
+  }
+});
+
+// GET /api/teacher/children/:childId/math-records
+teacherRouter.get("/children/:childId/math-records", async (req, res) => {
+  try {
+    const childId = parseInt(req.params.childId, 10);
+    const familyId = req.auth!.familyId;
+
+    const child = await pool.query(
+      "SELECT id FROM users WHERE id = $1 AND family_id = $2 AND role = 'child'",
+      [childId, familyId],
+    );
+    if (child.rows.length === 0) {
+      res.status(404).json({ error: "Child not found" });
+      return;
+    }
+
+    const result = await pool.query(
+      "SELECT operation, best_time_secs, achieved_at FROM math_records WHERE user_id = $1",
+      [childId],
+    );
+
+    const records: Record<string, { bestTimeSecs: number; achievedAt: string } | null> = {
+      addition: null, subtraction: null, multiplication: null, division: null,
+    };
+    for (const row of result.rows) {
+      records[row.operation] = { bestTimeSecs: row.best_time_secs, achievedAt: row.achieved_at };
+    }
+
+    res.json(records);
+  } catch (err) {
+    console.error("GET /api/teacher/children/:childId/math-records error:", err);
+    res.status(500).json({ error: "Failed to load math records" });
+  }
+});
+
+// GET /api/teacher/children/:childId/math-stats
+teacherRouter.get("/children/:childId/math-stats", async (req, res) => {
+  try {
+    const childId = parseInt(req.params.childId, 10);
+    const familyId = req.auth!.familyId;
+
+    const child = await pool.query(
+      "SELECT id FROM users WHERE id = $1 AND family_id = $2 AND role = 'child'",
+      [childId, familyId],
+    );
+    if (child.rows.length === 0) {
+      res.status(404).json({ error: "Child not found" });
+      return;
+    }
+
+    const statsResult = await pool.query(
+      "SELECT total_points, current_streak, longest_streak, last_active FROM user_stats WHERE user_id = $1 AND app = 'math'",
+      [childId],
+    );
+
+    const stats = statsResult.rows.length > 0
+      ? {
+          totalPoints: statsResult.rows[0].total_points,
+          currentStreak: statsResult.rows[0].current_streak,
+          longestStreak: statsResult.rows[0].longest_streak,
+          lastActive: statsResult.rows[0].last_active,
+        }
+      : { totalPoints: 0, currentStreak: 0, longestStreak: 0, lastActive: null };
+
+    res.json(stats);
+  } catch (err) {
+    console.error("GET /api/teacher/children/:childId/math-stats error:", err);
+    res.status(500).json({ error: "Failed to load math stats" });
+  }
+});
