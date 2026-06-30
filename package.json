@@ -11,7 +11,7 @@
     "dev": "npm run dev:server & npm run dev:web",
     "dev:server": "npm run -w @family-learning/server dev",
     "dev:web": "npm run -w @family-learning/web dev",
-    "build": "npm run -w @family-learning/web build && npm run -w @family-learning/server build && npm run migrate && npm run setup-auth",
+    "build": "npm run -w @family-learning/web build && npm run -w @family-learning/server build",
     "start": "node packages/server/dist/index.js",
     "migrate": "npm run -w @family-learning/server migrate",
     "seed": "npm run -w @family-learning/server seed",
