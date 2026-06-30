@@ -82,10 +82,17 @@ export interface SessionResult {
 export interface AuthUser {
   id: number;
   displayName: string;
-  role: "parent" | "child";
-  familyId: number;
+  role: "parent" | "child" | "admin";
+  familyId: number | null;
   currentLevel?: number;
   email?: string;
+}
+
+export interface TeacherSummary {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
 }
 
 export interface ChildProfile {
@@ -614,5 +621,63 @@ export async function deleteStudent(studentId: number): Promise<any> {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete student");
+  return res.json();
+}
+
+// ── Admin API ─────────────────────────────────────────────────
+
+export async function loginAdmin(
+  email: string,
+  password: string,
+): Promise<{ token: string; user: AuthUser }> {
+  const res = await fetch("/api/auth/admin-login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Login failed" }));
+    throw new Error(err.error || "Login failed");
+  }
+  return res.json();
+}
+
+export async function fetchTeachers(): Promise<TeacherSummary[]> {
+  const res = await fetch("/api/admin/teachers", { headers: authHeaders() });
+  if (!res.ok) throw new Error("Failed to load teachers");
+  return res.json();
+}
+
+export async function createTeacher(data: {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+}): Promise<TeacherSummary & { familyId: number }> {
+  const res = await fetch("/api/admin/teachers", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to create teacher");
+  }
+  return res.json();
+}
+
+export async function resetTeacherPassword(
+  teacherId: number,
+  password: string,
+): Promise<{ id: number; reset: boolean }> {
+  const res = await fetch(`/api/admin/teachers/${teacherId}/reset-password`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to reset password");
+  }
   return res.json();
 }

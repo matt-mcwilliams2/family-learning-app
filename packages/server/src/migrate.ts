@@ -188,6 +188,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username IS NOT NULL;
 `;
 
+const UP_008 = `
+-- Admin role: widen role constraint and allow NULL family_id
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('parent', 'child', 'admin'));
+ALTER TABLE users ALTER COLUMN family_id DROP NOT NULL;
+`;
+
 const MIGRATIONS: Migration[] = [
   { name: "001_initial_schema", sql: UP },
   { name: "002_mastery_and_sessions", sql: UP_002 },
@@ -196,6 +203,7 @@ const MIGRATIONS: Migration[] = [
   { name: "005_weekly_new_words", sql: UP_005 },
   { name: "006_excluded_words_and_assigned_tests", sql: UP_006 },
   { name: "007_student_management", sql: UP_007 },
+  { name: "008_admin_role", sql: UP_008 },
 ];
 
 async function migrate() {

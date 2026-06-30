@@ -7,8 +7,8 @@ const TOKEN_EXPIRY = "30d";
 
 export interface AuthPayload {
   userId: number;
-  familyId: number;
-  role: "parent" | "child";
+  familyId: number | null;
+  role: "parent" | "child" | "admin";
 }
 
 // Extend Express Request
@@ -71,6 +71,15 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 export function requireParent(req: Request, res: Response, next: NextFunction) {
   if (req.auth?.role !== "parent") {
     res.status(403).json({ error: "Parent account required" });
+    return;
+  }
+  next();
+}
+
+/** Require the logged-in user to be an admin. Must come after requireAuth. */
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (req.auth?.role !== "admin") {
+    res.status(403).json({ error: "Admin account required" });
     return;
   }
   next();

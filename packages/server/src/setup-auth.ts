@@ -13,6 +13,10 @@ const PARENT_PASSWORD = "OwlSpell2025!";
 const PARENT_NAME = "Parent";
 const SALT_ROUNDS = 10;
 
+const ADMIN_EMAIL = "matt@mattmcwilliams.com";
+const ADMIN_PASSWORD = "R87%3h9s%h3SHh62hsi%@!!";
+const ADMIN_NAME = "Admin";
+
 const TEST_USERNAME = "test123";
 const TEST_PASSWORD = "test123";
 const TEST_FIRST = "Test";
@@ -183,6 +187,27 @@ async function setup() {
         await client.query("DELETE FROM users WHERE id = $1", [oldId]);
         console.log(`  Deleted old child "${child.display_name}" (id=${oldId})`);
       }
+    }
+
+    // ── Create admin account ──
+    const existingAdmin = await client.query(
+      "SELECT id FROM users WHERE email = $1 AND role = 'admin'",
+      [ADMIN_EMAIL],
+    );
+
+    if (existingAdmin.rows.length > 0) {
+      console.log("Admin account already exists, skipping creation.");
+    } else {
+      const adminHash = await bcrypt.hash(ADMIN_PASSWORD, SALT_ROUNDS);
+      const adminResult = await client.query(
+        `INSERT INTO users (family_id, display_name, role, email, password_hash,
+                            first_name, last_name, current_level)
+         VALUES (NULL, $1, 'admin', $2, $3, 'Matt', 'McWilliams', 6.0)
+         RETURNING id`,
+        [ADMIN_NAME, ADMIN_EMAIL, adminHash],
+      );
+      console.log(`Created admin account id=${adminResult.rows[0].id}`);
+      console.log(`  Email:    ${ADMIN_EMAIL}`);
     }
 
     await client.query("COMMIT");

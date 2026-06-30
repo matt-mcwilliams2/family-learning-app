@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { App } from "./App";
 import { Login } from "./Login";
+import { AdminLogin } from "./AdminLogin";
 import { TeacherDashboard } from "./TeacherDashboard";
+import { AdminDashboard } from "./AdminDashboard";
 import {
   getToken,
   clearToken,
@@ -13,6 +15,8 @@ import {
 export function AuthRoot() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [checking, setChecking] = useState(true);
+
+  const isAdminLoginPath = window.location.pathname === "/admin/login";
 
   // On mount, check for an existing token
   useEffect(() => {
@@ -38,9 +42,13 @@ export function AuthRoot() {
   }, []);
 
   const handleLogout = useCallback(() => {
+    const wasAdmin = user?.role === "admin";
     clearToken();
     setUser(null);
-  }, []);
+    if (wasAdmin) {
+      window.history.replaceState(null, "", "/admin/login");
+    }
+  }, [user]);
 
   if (checking) {
     return (
@@ -56,7 +64,15 @@ export function AuthRoot() {
 
   // Not logged in → show login screen
   if (!user) {
+    if (isAdminLoginPath) {
+      return <AdminLogin onLogin={handleLogin} />;
+    }
     return <Login onLogin={handleLogin} />;
+  }
+
+  // Admin → show admin dashboard
+  if (user.role === "admin") {
+    return <AdminDashboard onLogout={handleLogout} />;
   }
 
   // Parent → show teacher dashboard

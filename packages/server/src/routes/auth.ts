@@ -129,6 +129,62 @@ authRouter.post("/child-login", async (req, res) => {
   }
 });
 
+// POST /api/auth/admin-login
+// Body: { email, password }
+// Returns: { token, user }
+authRouter.post("/admin-login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      res.status(400).json({ error: "Email and password required" });
+      return;
+    }
+
+    const result = await pool.query(
+      `SELECT id, display_name, role, password_hash
+       FROM users
+       WHERE email = $1 AND role = 'admin'`,
+      [email.toLowerCase().trim()],
+    );
+
+    if (result.rows.length === 0) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+
+    const user = result.rows[0];
+    if (!user.password_hash) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+
+    const valid = await comparePassword(password, user.password_hash);
+    if (!valid) {
+      res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+
+    const token = signToken({
+      userId: user.id,
+      familyId: null,
+      role: "admin",
+    });
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        displayName: user.display_name,
+        role: "admin",
+        familyId: null,
+      },
+    });
+  } catch (err) {
+    console.error("POST /api/auth/admin-login error:", err);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
+
 // GET /api/auth/profiles
 // Returns child profiles for the family (no auth needed — this is the profile picker)
 // Query: familyId (optional, defaults to first family)

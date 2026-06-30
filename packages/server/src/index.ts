@@ -16,6 +16,7 @@ import { sessionsRouter } from "./routes/sessions.js";
 import { placementRouter } from "./routes/placement.js";
 import { badgesRouter } from "./routes/badges.js";
 import { assignedTestsRouter } from "./routes/assigned-tests.js";
+import { adminRouter } from "./routes/admin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -41,6 +42,9 @@ app.use("/api/auth", authRouter);
 
 // Teacher dashboard (parent-only, auth handled inside router)
 app.use("/api/teacher", teacherRouter);
+
+// Admin dashboard (admin-only, auth handled inside router)
+app.use("/api/admin", adminRouter);
 
 // All child-facing API routes require auth
 app.use("/api/words", requireAuth, wordsRouter);

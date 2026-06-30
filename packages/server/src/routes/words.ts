@@ -56,7 +56,7 @@ wordsRouter.get("/session/:userId", async (req, res) => {
     const gradeLow = Math.floor(currentLevel);
     const gradeHigh = Math.ceil(currentLevel);
 
-    const familyId = req.auth!.familyId;
+    const familyId = req.auth!.familyId as number;
 
     let words: any[] = [];
 
